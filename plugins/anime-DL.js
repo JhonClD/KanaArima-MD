@@ -1330,35 +1330,67 @@ async function scrapeTioAnime(url) {
 async function scrapeJKanime(url) {
   const servidores = []
 
-  // ── Estrategia 0: Links directos de descarga (tabla "Enlaces de descarga") ─
-  // JKanime muestra una tabla con Servidor / Tamaño / Audio / Descarga
-  // con botones <a href="https://mega.nz/...">Descargar HD</a>
+  // ── Estrategia 0: Tabla "Enlaces de descarga" + resolver redirects ─────────
+  // JKanime usa botones <a href="https://c1.jkplayers.com/d/XXXX/">Descargar HD</a>
+  // en una tabla con columnas: Servidor | Tamaño | Audio | Descarga
+  // Hay que seguir cada redirect de jkplayers para obtener la URL real.
   try {
     const html = await fetchHtml(url)
     const $    = cheerio.load(html)
 
-    $('a[href]').each((_, el) => {
-      const href  = $(el).attr('href') || ''
-      const label = ($(el).closest('tr').find('td').first().text() || $(el).text()).trim().toLowerCase()
-      if (!href.startsWith('http')) return
-      const esServidor =
-        href.includes('mega.nz') || href.includes('mediafire.com') ||
-        href.includes('voe.sx')  || href.includes('streamtape') ||
-        href.includes('filemoon')|| href.includes('mp4upload') ||
-        href.includes('streamwish') || href.includes('dood') ||
-        href.includes('upstream')|| href.includes('ok.ru') ||
-        href.includes('vidhide') || href.includes('mixdrop') ||
-        href.includes('savefiles') || href.includes('gofile.io')
-      if (esServidor && !servidores.find(s => s.url === href)) {
-        servidores.push({ nombre: label || detectarServidor(href), url: normalizarMegaUrl(href) })
+    // Función: seguir redirect HTTP hasta la URL final (max 4 saltos, 8s)
+    const resolverRedirect = async (href) => {
+      let current = href
+      for (let i = 0; i < 4; i++) {
+        try {
+          const res = await fetch(current, {
+            method  : 'HEAD',
+            redirect: 'manual',
+            headers : buildHeaders({ Referer: 'https://jkanime.net/' }),
+            timeout : 8000,
+          })
+          const loc = res.headers?.get?.('location')
+          if (!loc) break
+          // Si la redirección es relativa, hacerla absoluta
+          current = loc.startsWith('http') ? loc : new URL(loc, current).href
+          // Si ya llegamos a un host conocido o no es jkplayers, parar
+          if (!current.includes('jkplayers.com') && !current.includes('jkanime.net')) break
+        } catch (_) { break }
       }
+      return current
+    }
+
+    const promesas = []
+    $('table tr').each((_, tr) => {
+      const tds = $(tr).find('td')
+      if (tds.length < 4) return
+      const nombre = $(tds[0]).text().trim()
+      const link   = $(tds[3]).find('a[href]').first().attr('href') || ''
+      if (!nombre || !link.startsWith('http')) return
+
+      promesas.push(
+        resolverRedirect(link).then(finalUrl => ({
+          nombre : nombre.toLowerCase(),
+          url    : normalizarMegaUrl(finalUrl),
+          directo: /mega\.nz|mediafire\.com|gofile\.io|savefiles\.me/.test(finalUrl),
+        }))
+      )
     })
 
+    if (promesas.length > 0) {
+      const resultados = await Promise.allSettled(promesas)
+      for (const r of resultados) {
+        if (r.status === 'fulfilled' && r.value?.url && !servidores.find(s => s.url === r.value.url)) {
+          servidores.push(r.value)
+        }
+      }
+    }
+
     if (servidores.length > 0) {
-      console.log(`[jkanime] ${servidores.length} links directos:`, servidores.map(s => s.nombre).join(', '))
+      console.log(`[jkanime] ${servidores.length} links tabla:`, servidores.map(s => s.nombre).join(', '))
       return servidores
     }
-  } catch (e) { console.error('[jkanime] links directos:', e.message) }
+  } catch (e) { console.error('[jkanime] tabla descargas:', e.message) }
 
   // ── Estrategia 1: API oficial  (campo `remote` en base64) ────────────────
   const jkMatch = url.match(/jkanime\.net\/([^/]+)\/(\d+)/)
@@ -2422,11 +2454,10 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
       : sinMegaMf),
   ]
 
+  // ── Mostrar lista de servidores con botones interactivos ─────────────────
   const tmpDir = path.join(process.env.TMPDIR || '/tmp', `anime_${Date.now()}`)
   fs.mkdirSync(tmpDir, { recursive: true })
 
-  // ── Mostrar lista de servidores con botones interactivos ─────────────────
-  const TIMEOUT_SEG = 120  // 2 minutos para elegir
   const servidorEmojis = { mega: '📦', mediafire: '📦', mp4upload: '📹', filemoon: '🌙',
     streamwish: '⭐', streamtape: '📼', doodstream: '🟣', voe: '🟠', upstream: '🔵',
     okru: '🔴', vidhide: '🟡', mixdrop: '🔵', generico: '🎬',
@@ -2437,20 +2468,19 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
   }
 
   // Guardar pick con owner ANTES de enviar el mensaje
-  const pickTimestamp = Date.now()
   const sessionKey = `${m.chat}|${m.sender}`
   global.pendingServerPicks.set(m.chat, {
-    servers        : listaIntentos,
+    servers     : listaIntentos,
     tmpDir,
     sitioElegido,
     argsParaAnime,
-    timestamp      : pickTimestamp,
-    owner          : m.sender,
+    timestamp   : Date.now(),
+    owner       : m.sender,
   })
   global.animeDlSessions[sessionKey] = {
-    owner  : m.sender,
-    chat   : m.chat,
-    expiry : Date.now() + TIMEOUT_SEG * 1000,
+    owner : m.sender,
+    chat  : m.chat,
+    expiry: Date.now() + 10 * 60 * 1000,   // 10 min para elegir
   }
   guardarPicks()
 
@@ -2468,7 +2498,7 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
       }))
 
       const interactiveMessage = {
-        body  : { text: `✅ = link directo (más rápido)\n\n⏱️ Auto-descarga en ${TIMEOUT_SEG}s si no eliges` },
+        body  : { text: `✅ = link directo (más rápido)\nElige el servidor para descargar.` },
         footer: { text: global.wm || 'Kana Arima Bot' },
         header: { title: `🎬 ${sitioElegido?.nombre || 'Anime'} — ${listaIntentos.length} servidores`, hasMediaAttachment: false },
         nativeFlowMessage: {
@@ -2500,7 +2530,7 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
         .join('\n')
       await m.reply(
         `🎬 *${sitioElegido?.nombre || 'Anime'} — Servidores (${listaIntentos.length}):*\n\n` +
-        `${listaTxt}\n\n✅ = directo\n_Responde con_ *.dl <letra>* (ej: *.dl a*)\n⏱️ _Auto-descarga en ${TIMEOUT_SEG}s..._`
+        `${listaTxt}\n\n✅ = directo\n_Responde con_ *.dl <letra>* (ej: *.dl a*)`
       )
     }
   } else {
@@ -2509,20 +2539,9 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
       .join('\n')
     await m.reply(
       `🎬 *${sitioElegido?.nombre || 'Anime'} — Servidores (${listaIntentos.length}):*\n\n` +
-      `${listaTxt}\n\n✅ = directo\n_Responde con_ *.dl <letra>* (ej: *.dl a*)\n⏱️ _Auto-descarga en ${TIMEOUT_SEG}s..._`
+      `${listaTxt}\n\n✅ = directo\n_Responde con_ *.dl <letra>* (ej: *.dl a*)`
     )
   }
-
-  // Auto-descarga tras el timeout si el usuario no eligió
-  setTimeout(async () => {
-    const pick = global.pendingServerPicks.get(m.chat)
-    if (!pick || pick.timestamp !== pickTimestamp) return
-    global.pendingServerPicks.delete(m.chat)
-    delete global.animeDlSessions[sessionKey]
-    guardarPicks()
-    await m.reply(`⏱️ Tiempo agotado — descargando desde *${pick.servers[0]?.nombre || 'primer servidor'}*...`)
-    await ejecutarDescargaServidor(pick.servers, 0, pick, m, conn)
-  }, TIMEOUT_SEG * 1000)
 }
 
 handler.before = async function (m, { conn }) {
