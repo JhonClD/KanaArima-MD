@@ -1,13 +1,9 @@
 import fetch from 'node-fetch'
 import { format } from 'util'
 import fs from 'fs'
+import { generateWAMessageFromContent } from '@whiskeysockets/baileys'
 
 const handler = async (m, {conn, text, usedPrefix}) => {
-  // Función para reaccionar compatible con todas las versiones
-  const react = async (emoji) => {
-    await conn.sendMessage(m.chat, { react: { text: emoji, key: m.key } })
-  }
-
   try {
     const datas = global
     const idioma = datas.db.data.users[m.sender]?.language || global.defaultLenguaje || 'es'
@@ -17,53 +13,66 @@ const handler = async (m, {conn, text, usedPrefix}) => {
     if (!text) throw `*Uso:* ${usedPrefix}fetch https://ejemplo.com/api.js`
     if (!/^https?:\/\//.test(text)) throw tradutor.texto1
 
-    await react('⏳')
-
     const res = await fetch(text, { timeout: 20000 })
     
     const size = res.headers.get('content-length')
-    if (size > 10 * 1024 * 1024) { // 10 MB máximo
-      throw `*Archivo muy pesado:* ${(size / 1024).toFixed(2)} MB. Máx 10 MB`
+    if (size > 10 * 1024 * 1024) {
+      throw `*Archivo muy pesado:* ${(size / 1024 / 1024).toFixed(2)} MB. Máx 10 MB`
     }
     
     const contentType = res.headers.get('content-type') || ''
     
-    // Si es binario: imagen, video, zip, lo manda como archivo
     if (!/text|json|javascript|html|css|xml/.test(contentType)) {
-      await conn.sendFile(m.chat, text, 'archivo', `*Tipo:* ${contentType}\n*URL:* ${text}`, m)
-      return await react('✅')
+      return conn.sendFile(m.chat, text, 'archivo', `*Tipo:* ${contentType}\n*URL:* ${text}`, m)
     }
     
     let code = await res.text()
     
-    // Detecta el lenguaje por extensión o content-type
+    // Detecta lenguaje y nombre
     let lang = 'txt'
-    if (text.endsWith('.js') || /javascript/.test(contentType)) lang = 'js'
-    else if (text.endsWith('.json') || /json/.test(contentType)) lang = 'json'
-    else if (text.endsWith('.py') || /python/.test(contentType)) lang = 'python'
-    else if (text.endsWith('.html') || /html/.test(contentType)) lang = 'html'
-    else if (text.endsWith('.css') || /css/.test(contentType)) lang = 'css'
+    let langName = 'Texto'
+    if (text.endsWith('.js') || /javascript/.test(contentType)) {
+      lang = 'javascript'; langName = 'Código de Js'
+    }
+    else if (text.endsWith('.json') || /json/.test(contentType)) {
+      lang = 'json'; langName = 'Código JSON'
+    }
+    else if (text.endsWith('.py') || /python/.test(contentType)) {
+      lang = 'python'; langName = 'Código de Python'
+    }
+    else if (text.endsWith('.html') || /html/.test(contentType)) {
+      lang = 'html'; langName = 'Código HTML'
+    }
+    else if (text.endsWith('.css') || /css/.test(contentType)) {
+      lang = 'css'; langName = 'Código CSS'
+    }
     
-    // Si es JSON, lo formatea bonito
     if (lang === 'json') {
-      try {
-        code = format(JSON.parse(code))
-      } catch {}
+      try { code = format(JSON.parse(code)) } catch {}
     }
     
-    // Corta si es muy largo
     if (code.length > 60000) {
-      code = code.slice(0, 60000) + '\n\n...[CORTADO: archivo muy largo]'
+      code = code.slice(0, 60000) + '\n\n...[CORTADO]'
     }
+
+    // ✅ Esto genera la vista previa nativa de WhatsApp
+    const msg = generateWAMessageFromContent(m.chat, {
+      interactiveMessage: {
+        header: { title: langName, hasMediaAttachment: false },
+        body: { text: 'Ver código' },
+        nativeFlowMessage: {
+          codeMessage: {
+            code: code,
+            language: lang
+          }
+        }
+      }
+    }, {})
     
-    // Manda en bloque de código como yo
-    const msg = `\`\`\`${lang}\n${code}\n\`\`\``
-    await m.reply(msg)
-    await react('✅')
+    await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
     
   } catch (e) {
     console.error('[FETCH]', e)
-    await react('❌')
     throw `*Error:* ${e.message || e}`
   }
 }
