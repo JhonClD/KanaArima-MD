@@ -34,13 +34,8 @@ global.titulowm2 = `Kana Bot`
 global.igfg = 'Kana Arima';
 global.wait = '*_[ ⏳ ] Cargando..._*';
 
-// Solución al error ENOENT: Evita que el bot haga crash si falta la imagen
-try {
-  global.imagen1 = fs.readFileSync('./src/assets/images/menu/languages/es/menu.png');
-} catch (e) {
-  console.log(chalk.yellow('⚠️ No se encontró menu.png, iniciando sin imagen local para evitar crash.'));
-  global.imagen1 = ''; // Puedes colocar una URL directa aquí si prefieres no usar rutas locales
-}
+// Ruta corregida: Se eliminó la carpeta inexistente "/menu/"
+global.imagen1 = fs.readFileSync('./src/assets/images/languages/es/menu.png');
 
 global.mods = [];
 
