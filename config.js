@@ -34,7 +34,8 @@ global.titulowm2 = `Kana Bot`
 global.igfg = 'Kana Arima';
 global.wait = '*_[ ⏳ ] Cargando..._*';
 
-// Ruta corregida: Se eliminó la carpeta inexistente "/menu/"
+
+
 global.imagen1 = fs.readFileSync('./src/assets/images/languages/es/menu.png');
 
 global.mods = [];
@@ -72,7 +73,7 @@ global.htki = '*⭑•̩̩͙⊱•••• ☪*';
 global.htka = '*☪ ••••̩̩͙⊰•⭑*';
 global.comienzo = '• • ◕◕════';
 global.fin = '════◕◕ • •';
-global.botdate = `*[ 📅 ] Fecha:* ${moment.tz('America/Mexico_City').format('DD/MM/YY')}`;
+global.botdate = `*[ 📅 ] Fecha:*  ${moment.tz('America/Mexico_City').format('DD/MM/YY')}`;
 global.bottime = `*[ ⏳ ] Hora:* ${moment.tz('America/Mexico_City').format('HH:mm:ss')}`;
 
 global.multiplier = 99;
@@ -91,3 +92,4 @@ watchFile(file, () => {
   console.log(chalk.redBright('Update \'config.js\''));
   import(`${file}?update=${Date.now()}`);
 });
+
