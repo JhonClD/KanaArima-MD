@@ -1327,242 +1327,150 @@ async function scrapeTioAnime(url) {
 }
 
 // ── JKanime ───────────────────────────────────────────────────────────────────
+// La tabla "Enlaces de descarga" se renderiza con JavaScript, por lo que
+// se necesita Puppeteer para ver los servidores reales.
+// El flujo es: página carga → XHR con lista de descargas → tabla DOM con nombres.
 async function scrapeJKanime(url) {
   const servidores = []
 
-  // ── Estrategia 0: Tabla "Enlaces de descarga" + resolver redirects ─────────
-  // JKanime usa botones <a href="https://c1.jkplayers.com/d/XXXX/">Descargar HD</a>
-  // en una tabla con columnas: Servidor | Tamaño | Audio | Descarga
-  // Hay que seguir cada redirect de jkplayers para obtener la URL real.
-  try {
-    const html = await fetchHtml(url)
-    const $    = cheerio.load(html)
-
-    // Función: seguir redirect HTTP hasta la URL final (max 4 saltos, 8s)
-    const resolverRedirect = async (href) => {
-      let current = href
-      for (let i = 0; i < 4; i++) {
-        try {
-          const res = await fetch(current, {
-            method  : 'HEAD',
-            redirect: 'manual',
-            headers : buildHeaders({ Referer: 'https://jkanime.net/' }),
-            timeout : 8000,
-          })
-          const loc = res.headers?.get?.('location')
-          if (!loc) break
-          // Si la redirección es relativa, hacerla absoluta
-          current = loc.startsWith('http') ? loc : new URL(loc, current).href
-          // Si ya llegamos a un host conocido o no es jkplayers, parar
-          if (!current.includes('jkplayers.com') && !current.includes('jkanime.net')) break
-        } catch (_) { break }
+  // ── Resolución de redirect (jkplayers → URL real) ──────────────────────────
+  const resolverRedirect = async (href) => {
+    let current = href
+    try {
+      for (let i = 0; i < 5; i++) {
+        const res = await fetch(current, {
+          method : 'HEAD',
+          redirect: 'manual',
+          headers : buildHeaders({ Referer: 'https://jkanime.net/' }),
+        })
+        const loc = res.headers?.get?.('location') || res.headers?.location
+        if (!loc) break
+        current = loc.startsWith('http') ? loc : new URL(loc, current).href
+        // parar si ya salimos de jkplayers
+        if (!current.includes('jkplayers.com')) break
       }
-      return current
+    } catch (_) {}
+    return current
+  }
+
+  // ── Estrategia 0: Puppeteer — tabla de descargas renderizada ───────────────
+  const jkMatch = url.match(/jkanime\.net\/([^/]+)\/(\d+)/)
+  const slug    = jkMatch?.[1]
+  const cap     = jkMatch?.[2]
+
+  try {
+    const chromiumPaths = [
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      '/data/data/com.termux/files/usr/bin/chromium-browser',
+      '/data/data/com.termux/files/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+    ].filter(Boolean)
+    let execPath = null
+    for (const p of chromiumPaths) { if (fs.existsSync(p)) { execPath = p; break } }
+    if (!execPath) throw new Error('Chromium no disponible')
+
+    const browser = await puppeteerExtra.launch({
+      headless      : 'new',
+      executablePath: execPath,
+      args          : ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+    })
+    const page = await browser.newPage()
+    await page.setUserAgent(randomUA())
+    await page.setExtraHTTPHeaders(buildHeaders({ Referer: 'https://jkanime.net/' }))
+
+    // Bloquear recursos pesados para acelerar
+    await page.setRequestInterception(true)
+    page.on('request', req => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) req.abort()
+      else req.continue()
+    })
+
+    try { await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 }) } catch (_) {
+      try { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }) } catch (_) {}
     }
 
-    const promesas = []
-    $('table tr').each((_, tr) => {
-      const tds = $(tr).find('td')
-      if (tds.length < 4) return
-      const nombre = $(tds[0]).text().trim()
-      const link   = $(tds[3]).find('a[href]').first().attr('href') || ''
-      if (!nombre || !link.startsWith('http')) return
+    // Esperar a que la tabla de descargas aparezca en el DOM
+    try { await page.waitForSelector('table tr td a[href]', { timeout: 8000 }) } catch (_) {}
 
-      promesas.push(
-        resolverRedirect(link).then(finalUrl => ({
+    // Extraer filas de la tabla "Enlaces de descarga"
+    // Estructura: <tr><td>NombreServidor</td><td>Tamaño</td><td>Audio</td><td><a href="...">Descargar HD</a></td></tr>
+    const filas = await page.evaluate(() => {
+      const resultado = []
+      document.querySelectorAll('table tr').forEach(tr => {
+        const tds = tr.querySelectorAll('td')
+        if (tds.length < 4) return
+        const nombre = tds[0]?.textContent?.trim()
+        const link   = tds[3]?.querySelector('a[href]')?.href
+        if (nombre && link?.startsWith('http')) resultado.push({ nombre, link })
+      })
+      return resultado
+    })
+
+    await browser.close()
+
+    if (filas.length > 0) {
+      console.log(`[jkanime] tabla: ${filas.length} servidores:`, filas.map(f => f.nombre).join(', '))
+      // Resolver redirects en paralelo (jkplayers → mega/mediafire/etc.)
+      const promesas = filas.map(async ({ nombre, link }) => {
+        const finalUrl = await resolverRedirect(link)
+        return {
           nombre : nombre.toLowerCase(),
           url    : normalizarMegaUrl(finalUrl),
           directo: /mega\.nz|mediafire\.com|gofile\.io|savefiles\.me/.test(finalUrl),
-        }))
-      )
-    })
-
-    if (promesas.length > 0) {
+        }
+      })
       const resultados = await Promise.allSettled(promesas)
       for (const r of resultados) {
-        if (r.status === 'fulfilled' && r.value?.url && !servidores.find(s => s.url === r.value.url)) {
+        if (r.status === 'fulfilled' && r.value?.url && !servidores.find(s => s.url === r.value.url))
           servidores.push(r.value)
-        }
+      }
+      if (servidores.length > 0) {
+        console.log(`[jkanime] ${servidores.length} URLs resueltas`)
+        return servidores
       }
     }
+  } catch (e) { console.error('[jkanime] Puppeteer tabla:', e.message) }
 
-    if (servidores.length > 0) {
-      console.log(`[jkanime] ${servidores.length} links tabla:`, servidores.map(s => s.nombre).join(', '))
-      return servidores
-    }
-  } catch (e) { console.error('[jkanime] tabla descargas:', e.message) }
-
-  // ── Estrategia 1: API oficial  (campo `remote` en base64) ────────────────
-  const jkMatch = url.match(/jkanime\.net\/([^/]+)\/(\d+)/)
-  if (jkMatch) {
-    const slug = jkMatch[1], cap = jkMatch[2]
+  // ── Estrategia 1: API oficial /ajax/episode/2/ + decodificar remote ────────
+  if (slug && cap) {
     const SERVIDORES_JK = ['sw', 'jkvideo', 'okru', 'stape', 'mp4upload', 'filemoon', 'voe', 'uqload', 'doodstream', 'vidhide', 'mixdrop', 'streamwish']
-    const headers = {
-      ...buildHeaders({ Referer: url }),
-      'X-Requested-With': 'XMLHttpRequest',
-    }
+    const headers = { ...buildHeaders({ Referer: url }), 'X-Requested-With': 'XMLHttpRequest' }
+
     for (const srv of SERVIDORES_JK) {
       try {
         const apiUrl = `https://jkanime.net/ajax/episode/2/?id=${slug}&cap=${cap}&server=${srv}`
-        const res = await fetch(apiUrl, { headers, timeout: 12000 })
+        const res    = await fetch(apiUrl, { headers, timeout: 12000 })
         if (!res.ok) continue
-        const json = await res.json()
+        const json   = await res.json()
 
-        // Nuevo: campo `remote` en base64 (JKanime-py)
+        // Campo remote en base64
         if (json?.remote) {
           try {
-            let decoded = json.remote
-            const pad = 4 - (decoded.length % 4)
-            if (pad !== 4) decoded += '='.repeat(pad)
-            const embedUrl = Buffer.from(decoded, 'base64').toString('utf-8').trim()
-            if (embedUrl.startsWith('http') && !servidores.find(s => s.url === embedUrl)) {
-              console.log(`[jkanime] remote b64 ${srv}: ${embedUrl.slice(0, 60)}`)
-              servidores.push({ nombre: srv, url: embedUrl })
+            let d = json.remote
+            const pad = 4 - (d.length % 4)
+            if (pad !== 4) d += '='.repeat(pad)
+            const decoded = Buffer.from(d, 'base64').toString('utf-8').trim()
+            if (decoded.startsWith('http') && !servidores.find(s => s.url === decoded)) {
+              // Seguir el redirect para salir de jkplayers
+              const finalUrl = decoded.includes('jkplayers.com') ? await resolverRedirect(decoded) : decoded
+              console.log(`[jkanime] API ${srv}: ${finalUrl.slice(0, 60)}`)
+              servidores.push({ nombre: srv, url: normalizarMegaUrl(finalUrl) })
               continue
             }
           } catch (_) {}
         }
 
-        // Patrón clásico
         const embedUrl =
-          json?.source?.[0]?.file ||
-          json?.iframe || json?.url || json?.embed ||
-          json?.data?.url || json?.data?.iframe
+          json?.source?.[0]?.file || json?.iframe || json?.url ||
+          json?.embed || json?.data?.url || json?.data?.iframe
         if (embedUrl?.startsWith('http') && !servidores.find(s => s.url === embedUrl)) {
-          console.log(`[jkanime] API ${srv}: ${embedUrl.slice(0, 60)}`)
-          servidores.push({ nombre: srv, url: embedUrl })
+          const finalUrl = embedUrl.includes('jkplayers.com') ? await resolverRedirect(embedUrl) : embedUrl
+          console.log(`[jkanime] API ${srv}: ${finalUrl.slice(0, 60)}`)
+          servidores.push({ nombre: srv, url: normalizarMegaUrl(finalUrl) })
         }
       } catch (e) { console.error(`[jkanime] API ${srv}:`, e.message) }
     }
-  }
-
-  // ── Estrategia 2: HTML estático / __NEXT_DATA__ ───────────────────────────
-  if (servidores.length === 0) {
-    try {
-      const html = await fetchHtml(url)
-      const $ = cheerio.load(html)
-
-      const nextData = $('script#__NEXT_DATA__').html()
-      if (nextData) {
-        try {
-          const data = JSON.parse(nextData)
-          const str  = JSON.stringify(data)
-          const urlMatches = [...str.matchAll(/"(https?:\/\/[^"]+\.(?:m3u8|mp4)[^"]*)"/g)]
-          for (const [, u] of urlMatches) {
-            if (!servidores.find(s => s.url === u))
-              servidores.push({ nombre: detectarServidor(u), url: u, directo: true })
-          }
-          const srvMatches = [...str.matchAll(/"(?:server|embed|iframe)"\s*:\s*"(https?:\/\/[^"]+)"/g)]
-          for (const [, u] of srvMatches) {
-            if (!servidores.find(s => s.url === u))
-              servidores.push({ nombre: detectarServidor(u), url: u })
-          }
-        } catch (_) {}
-      }
-
-      $('script:not([src])').each((_, el) => {
-        const code = $(el).html() || ''
-        const serverVar = code.match(/var\s+(?:video|videos|servers?)\s*=\s*(\[[\s\S]*?\]);/)
-        if (serverVar) {
-          try {
-            const lista = JSON.parse(serverVar[1])
-            for (const item of lista) {
-              const u = item.file || item.url || item.embed || item.src || item.code
-              const n = item.name || item.title || item.server || detectarServidor(u || '')
-              if (u?.startsWith('http') && !servidores.find(s => s.url === u))
-                servidores.push({ nombre: n.toLowerCase(), url: u })
-            }
-          } catch (_) {}
-        }
-      })
-
-      $('[data-url]').each((_, el) => {
-        const raw = $(el).attr('data-url') || ''
-        let finalUrl = raw
-        try {
-          const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-          if (decoded.startsWith('http')) finalUrl = decoded
-        } catch (_) {}
-        if (finalUrl.startsWith('http') && !servidores.find(s => s.url === finalUrl))
-          servidores.push({ nombre: detectarServidor(finalUrl), url: finalUrl })
-      })
-
-      $('iframe[src]').each((_, el) => {
-        const src = $(el).attr('src') || ''
-        if (src.startsWith('http') && !servidores.find(s => s.url === src))
-          servidores.push({ nombre: detectarServidor(src), url: src })
-      })
-    } catch (e) { console.error('[jkanime] HTML parse:', e.message) }
-  }
-
-  // ── Estrategia 3: Puppeteer ───────────────────────────────────────────────
-  if (servidores.length === 0) {
-    console.log('[jkanime] Usando Puppeteer...')
-    try {
-      let captured = []
-      const chromiumPaths = [
-        process.env.PUPPETEER_EXECUTABLE_PATH,
-        '/data/data/com.termux/files/usr/bin/chromium-browser',
-        '/data/data/com.termux/files/usr/bin/chromium',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-      ].filter(Boolean)
-      let execPath = null
-      for (const p of chromiumPaths) { if (fs.existsSync(p)) { execPath = p; break } }
-      if (!execPath) throw new Error('Chromium no disponible')
-
-      const browser = await puppeteerExtra.launch({
-        headless: 'new',
-        executablePath: execPath,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-      })
-      const page = await browser.newPage()
-      await page.setUserAgent(randomUA())
-      await page.setExtraHTTPHeaders(buildHeaders({ Referer: 'https://jkanime.net/' }))
-      await page.setRequestInterception(true)
-      page.on('request', req => {
-        if (['image','stylesheet','font','media'].includes(req.resourceType())) req.abort()
-        else req.continue()
-      })
-      page.on('response', async response => {
-        const rUrl = response.url()
-        if (rUrl.includes('/ajax/episode/') || rUrl.includes('/stream/')) {
-          try {
-            const json = await response.json()
-            // Decodificar remote en base64 también aquí
-            if (json?.remote) {
-              try {
-                let d = json.remote
-                const pad = 4 - (d.length % 4)
-                if (pad !== 4) d += '='.repeat(pad)
-                const embedUrl = Buffer.from(d, 'base64').toString('utf-8').trim()
-                if (embedUrl.startsWith('http') && !captured.includes(embedUrl)) captured.push(embedUrl)
-              } catch (_) {}
-            }
-            const embedUrl = json?.source?.[0]?.file || json?.iframe || json?.url
-            if (embedUrl && !captured.includes(embedUrl)) captured.push(embedUrl)
-          } catch (_) {}
-        }
-        if (/\.(m3u8|mp4)/.test(rUrl) && !captured.includes(rUrl)) captured.push(rUrl)
-      })
-      try { await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 }) } catch (_) {}
-      try {
-        const botones = await page.$$('.server-item, [data-server], .nav-server a, .servidor-btn, button[data-s]')
-        for (const btn of botones.slice(0, 6)) {
-          try { await btn.click(); await new Promise(r => setTimeout(r, 1500)) } catch (_) {}
-        }
-      } catch (_) {}
-      const iframes = await page.evaluate(() =>
-        [...document.querySelectorAll('iframe[src]')].map(f => f.src).filter(s => s.startsWith('http'))
-      )
-      for (const src of iframes) {
-        if (!captured.includes(src)) captured.push(src)
-      }
-      await browser.close()
-      for (const u of captured) {
-        servidores.push({ nombre: detectarServidor(u), url: u, directo: /\.(m3u8|mp4)/.test(u) })
-      }
-    } catch (e) { console.error('[jkanime] Puppeteer:', e.message) }
   }
 
   console.log(`[jkanime] ${servidores.length} servidor(es) encontrados`)
