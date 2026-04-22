@@ -34,9 +34,13 @@ global.titulowm2 = `Kana Bot`
 global.igfg = 'Kana Arima';
 global.wait = '*_[ ⏳ ] Cargando..._*';
 
-
-
-global.imagen1 = fs.readFileSync('./src/assets/images/menu/languages/es/menu.png');
+// Solución al error ENOENT: Evita que el bot haga crash si falta la imagen
+try {
+  global.imagen1 = fs.readFileSync('./src/assets/images/menu/languages/es/menu.png');
+} catch (e) {
+  console.log(chalk.yellow('⚠️ No se encontró menu.png, iniciando sin imagen local para evitar crash.'));
+  global.imagen1 = ''; // Puedes colocar una URL directa aquí si prefieres no usar rutas locales
+}
 
 global.mods = [];
 
@@ -73,7 +77,7 @@ global.htki = '*⭑•̩̩͙⊱•••• ☪*';
 global.htka = '*☪ ••••̩̩͙⊰•⭑*';
 global.comienzo = '• • ◕◕════';
 global.fin = '════◕◕ • •';
-global.botdate = `*[ 📅 ] Fecha:*  ${moment.tz('America/Mexico_City').format('DD/MM/YY')}`;
+global.botdate = `*[ 📅 ] Fecha:* ${moment.tz('America/Mexico_City').format('DD/MM/YY')}`;
 global.bottime = `*[ ⏳ ] Hora:* ${moment.tz('America/Mexico_City').format('HH:mm:ss')}`;
 
 global.multiplier = 99;
@@ -92,4 +96,3 @@ watchFile(file, () => {
   console.log(chalk.redBright('Update \'config.js\''));
   import(`${file}?update=${Date.now()}`);
 });
-
