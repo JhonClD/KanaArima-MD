@@ -1,33 +1,39 @@
-import fetch from 'node-fetch';
-import {format} from 'util';
+import fetch from 'node-fetch'
+import { format } from 'util'
 
+const handler = async (m, { conn, text }) => {
+  if (!text) return m.reply('《✧》 Ingresa un enlace para realizar la solicitud.')
+  if (!/^https?:\/\//.test(text)) return m.reply('《✧》 Ingresa un enlace válido que comience con http o https.')
 
-const handler = async (m, {text}) => {
-  const datas = global
-  const idioma = datas.db.data.users[m.sender].language || global.defaultLenguaje
-  const _translate = JSON.parse(fs.readFileSync(`./src/languages/${idioma}.json`))
-  const tradutor = _translate.plugins.owner_fetch_get
+  const _url    = new URL(text)
+  const params  = new URLSearchParams(_url.searchParams)
+  const url     = `${_url.origin}${_url.pathname}${params.toString() ? '?' + params.toString() : ''}`
 
-  if (!/^https?:\/\//.test(text)) throw tradutor.texto1;
-  const _url = new URL(text);
-  const url = global.API(_url.origin, _url.pathname, Object.fromEntries(_url.searchParams.entries()), 'APIKEY');
-  const res = await fetch(url);
-  if (res.headers.get('content-length') > 100 * 1024 * 1024 * 1024) {
-    // delete res
-    throw `Content-Length: ${res.headers.get('content-length')}`;
+  const res           = await fetch(url)
+  const contentType   = res.headers.get('content-type')   || ''
+  const contentLength = parseInt(res.headers.get('content-length') || '0')
+
+  if (contentLength > 10 * 1024 * 1024) {
+    return m.reply(`《✧》 El archivo es demasiado grande.\nContent-Length: ${contentLength} bytes`)
   }
-  if (!/text|json/.test(res.headers.get('content-type'))) return conn.sendFile(m.chat, url, 'file', text, m);
-  let txt = await res.buffer();
-  try {
-    txt = format(JSON.parse(txt + ''));
-  } catch (e) {
-    txt = txt + '';
-  } finally {
-    m.reply('```' + txt.slice(0, 65536) + '```');
+
+  if (/text|json/.test(contentType)) {
+    const buffer = await res.buffer()
+    let txt
+    try {
+      txt = format(JSON.parse(buffer.toString()))
+    } catch {
+      txt = buffer.toString()
+    }
+    return m.reply('```' + txt.slice(0, 65536) + '```')
   }
-};
-handler.help = ['fetch', 'get'].map((v) => v + ' <url>');
-handler.tags = ['internet'];
-handler.command = /^(fetch|get)$/i;
-handler.rowner = true;
-export default handler;
+
+  return conn.sendFile(m.chat, url, 'file', text, m)
+}
+
+handler.help    = ['fetch <url>', 'get <url>']
+handler.tags    = ['owner']
+handler.command = /^(fetch|get)$/i
+handler.rowner  = true
+
+export default handler
