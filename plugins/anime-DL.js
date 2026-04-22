@@ -1,11 +1,9 @@
-// plugins/anime-DL.js  — v2.7  (extractores byse/dsvplay/lulu dedicados + descarga Savefiles/Gofile)
+// plugins/anime-DL.js  — v2.3  (extractores byse/dsvplay/lulu dedicados + descarga Savefiles/Gofile)
 //
 // Comandos:
 //   .anilist                          → muestra los sitios disponibles numerados
 //   .animedl <url>                    → descarga desde URL directa (episodio)
-//   .animedl <nombre>                 → busca en todos los sitios, muestra info + lista de episodios
-//                                       (primero AnimeFLV, luego el resto si no hay resultados)
-//   .animedl <S> <nombre>             → muestra info + lista de episodios desde el sitio S
+//   .animedl <nombre>                 → busca en AnimeFLV, muestra info y lista de episodios
 //   .animedl <nombre> <ep>            → busca en todos los sitios (temporada 1)
 //   .animedl <nombre> t<N> <ep>       → busca temporada N específica
 //   .animedl <S> <nombre> <ep>        → busca en el sitio número S
@@ -89,50 +87,29 @@ function cargarPicks() {
   } catch (e) { console.error('[picks] Error al cargar:', e.message) }
 }
 
-// ─── CATÁLOGO DE SITIOS ──────────────────────────────────────────────────────
+// ─── CATÁLOGO DE SITIOS  (AnimeFLV · TioAnime · LatAnime · JKanime) ──────────
 
 const SITIOS = [
   {
-    id: 1, nombre: 'AnimeFLV',    dominio: 'animeflv',
+    id: 1, nombre: 'AnimeFLV',  dominio: 'animeflv',
     url: 'https://www3.animeflv.net',
     buscar: buscarEnAnimeFLV,  scrape: scrapeAnimeFLV,
   },
   {
-    id: 2, nombre: 'TioAnime',    dominio: 'tioanime',
+    id: 2, nombre: 'TioAnime',  dominio: 'tioanime',
     url: 'https://tioanime.com',
     buscar: buscarEnTioAnime,  scrape: scrapeTioAnime,
   },
   {
-    id: 3, nombre: 'LatAnime',    dominio: 'latanime',
+    id: 3, nombre: 'LatAnime',  dominio: 'latanime',
     url: 'https://latanime.org',
     buscar: buscarEnLatAnime,  scrape: scrapeLatAnime,
   },
   {
-    id: 4, nombre: 'AnimeDBS',    dominio: 'animedbs',
-    url: 'https://animedbs.online',
-    buscar: buscarEnAnimeDBS,  scrape: scrapeAnimeDBS,
-  },
-  {
-    id: 5, nombre: 'MonosChinos', dominio: 'monoschinos',
-    url: 'https://monoschinos2.com',
-    buscar: buscarEnMonosChinos, scrape: scrapeMonosChinos,
-  },
-  {
-    id: 6, nombre: 'JKanime',     dominio: 'jkanime',
+    id: 4, nombre: 'JKanime',   dominio: 'jkanime',
     url: 'https://jkanime.net',
     buscar: buscarEnJKanime,   scrape: scrapeJKanime,
   },
-  {
-    id: 7, nombre: 'AnimeAV1',   dominio: 'animeav1',
-    url: 'https://animeav1.com',
-    buscar: buscarEnAnimeAV1,  scrape: scrapeAnimeAV1,
-  },
-  {
-    id: 8, nombre: 'Katanime',   dominio: 'katanime',
-    url: 'https://katanime.net',
-    buscar: buscarEnKatanime,  scrape: scrapeKatanime,
-  },
-
 ]
 
 function getSitioPorId(id)       { return SITIOS.find(s => s.id === Number(id)) || null }
@@ -159,41 +136,9 @@ function parseMegaError(err) {
 }
 
 // ─── MediaFire link extractor ─────────────────────────────────────────────────
-// Primario: Upa API (apicausas.xyz) — más rápido y estable que scraping
-// Fallback:  scraping directo de la página de MediaFire
-
-const UPA_API_KEY = 'causa-db9690e010e31139'
-const UPA_API_MF  = 'https://rest.apicausas.xyz/api/v1/descargas/mediafire'
 
 async function mediafireDl(url) {
   const { default: axios } = await import('axios')
-
-  // ── Intento 1: Upa API ────────────────────────────────────────────────────
-  try {
-    const apiRes = await axios.get(UPA_API_MF, {
-      params : { apikey: UPA_API_KEY, url },
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-      timeout: 15000,
-    })
-    const d = apiRes.data
-    // Adaptar distintos formatos de respuesta posibles
-    const link =
-      d?.url      || d?.link     || d?.download ||
-      d?.data?.url|| d?.data?.link || null
-    const name =
-      d?.name     || d?.filename  || d?.file_name ||
-      d?.data?.name || d?.data?.filename ||
-      url.split('/').filter(Boolean).at(-2) || 'archivo'
-    if (link) {
-      console.log(`[mediafire] Upa API OK: ${name}`)
-      return { name: name.replace(/\s+/g, ' ').trim(), link }
-    }
-    console.warn('[mediafire] Upa API: respuesta sin link, usando scraping...')
-  } catch (e) {
-    console.warn('[mediafire] Upa API falló:', e.message, '— usando scraping...')
-  }
-
-  // ── Fallback: scraping directo ────────────────────────────────────────────
   const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, httpsAgent })
   const $ = cheerio.load(res.data)
   const link =
@@ -411,18 +356,29 @@ async function scrapeInfoAnimeFLV(animeUrl) {
 // ─── Mostrar info + lista de episodios (AnimeFLV) ────────────────────────────
 
 async function mostrarInfoYEpisodios({ url, slug: inputSlug, title: inputTitle }, m, conn, usedPrefix, temporada = 1, statusKey = null) {
-  // Edita el "Buscando..." mientras carga, luego lo elimina visualmente
-  const editStatus = async (txt) => {
+  // Edita el mensaje de estado si ya existe (viene del "Buscando..."),
+  // o crea uno nuevo si se llega aquí directamente (p.ej. desde handler.before).
+  const updateStatus = async (txt) => {
     try {
-      if (statusKey) await conn.sendMessage(m.chat, { text: txt, edit: statusKey })
-    } catch (_) {}
+      if (statusKey) {
+        await conn.sendMessage(m.chat, { text: txt, edit: statusKey })
+      } else {
+        const sent = await m.reply(txt)
+        statusKey  = sent?.key ?? null
+      }
+    } catch (_) {
+      try {
+        const sent = await m.reply(txt)
+        statusKey  = sent?.key ?? null
+      } catch (_) {}
+    }
   }
 
-  await editStatus(`📡 Obteniendo datos de *${inputTitle || inputSlug}*...`)
+  await updateStatus(`📡 Obteniendo datos de *${inputTitle || inputSlug}*...`)
 
   const info = await scrapeInfoAnimeFLV(url)
   if (!info || info.episodes.length === 0) {
-    return editStatus(
+    return updateStatus(
       `❌ No pude obtener los episodios.\n` +
       `Prueba con el número directamente:\n  ${usedPrefix}animedl ${inputTitle || inputSlug} 1`
     )
@@ -430,225 +386,64 @@ async function mostrarInfoYEpisodios({ url, slug: inputSlug, title: inputTitle }
 
   const slug = info.slug || inputSlug || ''
 
+  // Descartar títulos de página de login / error
   const titulo = (info.title && !/iniciar.?ses|login|register|acceder/i.test(info.title))
-    ? info.title : (inputTitle || slug)
+    ? info.title
+    : (inputTitle || slug)
 
+  // Metadatos en español
   const generosTxt = info.genres.length    ? info.genres.join(', ')    : 'No disponible'
   const audioTxt   = info.audioTags.length ? info.audioTags.join(' · ') : null
   const descTxt    = info.description.length > 280
     ? info.description.slice(0, 280).trimEnd() + '…'
     : info.description || 'Sin descripción disponible.'
 
-  const sitioId = SITIOS.find(s => s.dominio === 'animeflv')?.id ?? 1
-  const epSlice = info.episodes.slice(-26)
-  const rows    = epSlice.map(ep => ({
-    title      : `Episodio ${ep}`,
-    description: 'AnimeFLV',
-    id         : `${usedPrefix}animedl ${sitioId} ${slug} ${ep}`,
-  }))
-
-  const infoTxt =
+  const caption =
     `*🎌 ${titulo}*\n\n` +
     `📖 *Descripción:*\n${descTxt}\n\n` +
     `🏷️ *Géneros:* ${generosTxt}\n` +
     (audioTxt ? `🎙️ *Audio:* ${audioTxt}\n` : '') +
-    `📺 *Episodios:* ${info.episodes.length}` +
-    (info.episodes.length > 26 ? ` _(últimos ${epSlice.length})_` : '')
+    `📺 *Episodios disponibles:* ${info.episodes.length}`
 
-  // ── Imagen con info en caption, luego botones de episodios ─────────────
+  // ── Enviar portada con caption ───────────────────────────────────────────
   if (info.coverUrl) {
     try {
-      await conn.sendMessage(m.chat, { image: { url: info.coverUrl }, caption: infoTxt }, { quoted: m })
-      await editStatus(`✅`)
-    } catch (_) {
-      await editStatus(infoTxt)
+      await conn.sendMessage(m.chat, {
+        image  : { url: info.coverUrl },
+        caption,
+      }, { quoted: m })
+      // Reducir el mensaje de estado a una sola línea (WA no permite eliminar mensajes propios)
+      await updateStatus(`✅ *${titulo}* · ${info.episodes.length} episodios disponibles`)
+    } catch (imgErr) {
+      console.error('[mostrarInfoYEpisodios] imagen:', imgErr.message)
+      // Sin imagen: editar el estado con el texto completo
+      await updateStatus(caption)
     }
   } else {
-    await editStatus(infoTxt)
+    // Sin portada: el estado se convierte en la info
+    await updateStatus(caption)
   }
+
+  // ── Lista de episodios — máx. 26 (letras a–z) ────────────────────────────
+  const sitioId = SITIOS.find(s => s.dominio === 'animeflv')?.id ?? 1
+  const epSlice = info.episodes.slice(-26)
 
   await enviarListaWA(conn, m, {
     title     : `📋 Episodios — ${titulo}`,
     body      : `${info.episodes.length > 26 ? `Últimos ${epSlice.length} de ${info.episodes.length} episodios.` : ''}\nElige el episodio a descargar:`,
     buttonText: 'VER EPISODIOS',
-    sections  : [{ title: 'Episodios disponibles', rows }],
+    sections  : [{
+      title: 'Episodios disponibles',
+      rows : epSlice.map(ep => ({
+        title      : `Episodio ${ep}`,
+        description: '',
+        id         : `${usedPrefix}animedl ${sitioId} ${slug} ${ep}`,
+      })),
+    }],
   })
 }
 
 // ─── Helpers de servidor ──────────────────────────────────────────────────────
-
-// ── Derivar URL de página de anime a partir de URL de episodio ────────────────
-function derivarUrlAnimePagina(episodeUrl, sitio) {
-  try {
-    const u    = new URL(episodeUrl)
-    const path = u.pathname
-    switch (sitio?.dominio) {
-      case 'animeflv': {
-        const slug = path.replace('/ver/', '').replace(/-\d+$/, '')
-        return `${u.origin}/anime/${slug}`
-      }
-      case 'tioanime': {
-        const slug = path.replace('/ver/', '').replace(/-\d+$/, '')
-        return `${u.origin}/anime/${slug}`
-      }
-      case 'jkanime': {
-        const slug = path.split('/').filter(Boolean)[0]
-        return `${u.origin}/${slug}/`
-      }
-      case 'animeav1': {
-        const parts = path.split('/').filter(Boolean)
-        return `${u.origin}/${parts[0]}/${parts[1]}`
-      }
-      case 'katanime': {
-        const mm = path.match(/^(\/anime\/[^/]+)/)
-        return mm ? `${u.origin}${mm[1]}/` : episodeUrl
-      }
-      case 'monoschinos': {
-        const slug = path.replace('/ver/', '').replace(/-episodio-\d+$/, '')
-        return `${u.origin}/anime/${slug}`
-      }
-      case 'latanime': {
-        const slug = path.replace('/ver/', '').replace(/-episodio-\d+$/, '')
-        return `${u.origin}/anime/${slug}`
-      }
-      default: return episodeUrl
-    }
-  } catch (_) { return episodeUrl }
-}
-
-// ── Scraper genérico de info de anime (og:meta + patrones comunes) ─────────────
-async function scrapeInfoGenerico(animeUrl) {
-  try {
-    const html = await fetchHtml(animeUrl)
-    const $    = cheerio.load(html)
-
-    const title =
-      $('h1.Title, h1.title, h1.entry-title, h1').first().text().trim() ||
-      $('meta[property="og:title"]').attr('content')?.split(/\s*[-|–]\s*/)[0].trim() || ''
-
-    const description = (
-      $('div.Description p, .sinopsis p, .synopsis p, .description p, .overview p, p.sinopsis').first().text().trim() ||
-      $('meta[property="og:description"]').attr('content') ||
-      $('meta[name="description"]').attr('content') || ''
-    ).slice(0, 500)
-
-    const genres = []
-    $('a[href*="genero"], a[href*="genre"], a[href*="categoria"], a[href*="browse?genre="],' +
-      '.genres a, .genre a, nav.Nvg a, .AnimeTags a').each((_, el) => {
-      const g = $(el).text().trim()
-      if (g && g.length < 30 && !genres.includes(g)) genres.push(g)
-    })
-
-    const coverUrl =
-      $('meta[property="og:image"]').attr('content') ||
-      $('div.AnimeCover img, .cover img, .poster img, .anime-cover img, figure img').first().attr('src') || null
-
-    let episodes = []
-    // Patrón 1: var episodes = [[N,0],…]
-    $('script').each((_, el) => {
-      const src = $(el).html() || ''
-      const m2  = src.match(/var\s+episodes\s*=\s*(\[\[[\s\S]*?\]\])\s*[,;]/)
-      if (m2) { try { episodes = JSON.parse(m2[1]).map(e => e[0]).sort((a, b) => a - b) } catch (_) {} }
-    })
-    // Patrón 2: links de episodios en la página
-    if (episodes.length === 0) {
-      const epNums = new Set()
-      $('a[href]').each((_, el) => {
-        const href = $(el).attr('href') || ''
-        if (/\/(ver|episodio|episode|cap|ep)[-/]/i.test(href) || /\/\d+\/?$/.test(href)) {
-          const n = parseInt(href.match(/[-/](\d+)\/?$/)?.[1])
-          if (!isNaN(n) && n > 0 && n < 10000) epNums.add(n)
-        }
-      })
-      episodes = [...epNums].sort((a, b) => a - b)
-    }
-    // Patrón 3: texto "X episodios"
-    if (episodes.length === 0) {
-      const tm = html.match(/(\d+)\s*(?:episodios?|episodes?|cap[íi]tulos?)/i)
-      if (tm) {
-        const total = parseInt(tm[1])
-        if (total > 0 && total < 10000) episodes = Array.from({ length: total }, (_, i) => i + 1)
-      }
-    }
-
-    console.log(`[scrapeInfoGenerico] title="${title}" eps=${episodes.length} cover=${!!coverUrl}`)
-    return { title, description, genres, coverUrl, episodes }
-  } catch (e) {
-    console.error('[scrapeInfoGenerico]', e.message)
-    return null
-  }
-}
-
-// ── Mostrar info + episodios para cualquier sitio ─────────────────────────────
-async function mostrarInfoYEpisodiosGenerico(nombre, temporada, sitio, m, conn, usedPrefix, statusKey = null) {
-  const editStatus = async (txt) => {
-    try {
-      if (statusKey) await conn.sendMessage(m.chat, { text: txt, edit: statusKey })
-      else { const sent = await m.reply(txt); statusKey = sent?.key ?? null }
-    } catch (_) {
-      try { const sent = await m.reply(txt); statusKey = sent?.key ?? null } catch (_) {}
-    }
-  }
-
-  await editStatus(`🔎 Buscando *${nombre}* en *${sitio.nombre}*...`)
-
-  let epUrl = null
-  try { epUrl = await sitio.buscar(nombre, 1, temporada) } catch (_) {}
-
-  if (!epUrl) {
-    return editStatus(
-      `❌ No encontré *${nombre}* en *${sitio.nombre}*.\n` +
-      `Prueba con otro sitio o especifica el episodio:\n  ${usedPrefix}animedl ${numToLetter(sitio.id - 1).toUpperCase()} ${nombre} 1`
-    )
-  }
-
-  const animePagUrl = derivarUrlAnimePagina(epUrl, sitio)
-  await editStatus(`📡 Obteniendo metadatos de *${sitio.nombre}*...`)
-
-  let info = await scrapeInfoGenerico(animePagUrl)
-  if (!info || info.episodes.length === 0) info = await scrapeInfoGenerico(epUrl)
-
-  const titulo   = (info?.title && !/iniciar.?ses|login|error/i.test(info.title)) ? info.title : nombre
-  const descTxt  = (info?.description || '').slice(0, 280).trimEnd() + ((info?.description?.length ?? 0) > 280 ? '…' : '')
-  const genres   = info?.genres   || []
-  const coverUrl = info?.coverUrl || null
-  let episodes   = info?.episodes || []
-  if (episodes.length === 0) episodes = Array.from({ length: 24 }, (_, i) => i + 1)
-
-  const generosTxt = genres.length ? genres.slice(0, 6).join(', ') : 'No disponible'
-  const letraSit   = numToLetter(sitio.id - 1).toUpperCase()
-  const epSlice    = episodes.slice(-26)
-  const rows       = epSlice.map(ep => ({
-    title      : `Episodio ${ep}`,
-    description: sitio.nombre,
-    id         : `${usedPrefix}animedl ${letraSit} ${nombre} ${ep}`,
-  }))
-
-  const infoTxt =
-    `*🎌 ${titulo}*\n\n` +
-    (descTxt ? `📖 *Descripción:*\n${descTxt}\n\n` : '') +
-    `🏷️ *Géneros:* ${generosTxt}\n` +
-    `🌐 *Sitio:* ${sitio.nombre}\n` +
-    `📺 *Episodios:* ${episodes.length}` +
-    (episodes.length > 26 ? ` _(últimos 26)_` : '')
-
-  // ── Imagen con info en caption, luego botones de episodios ─────────────
-  if (coverUrl) {
-    try {
-      await conn.sendMessage(m.chat, { image: { url: coverUrl }, caption: infoTxt }, { quoted: m })
-      await editStatus(`✅`)
-    } catch (_) { await editStatus(infoTxt) }
-  } else {
-    await editStatus(infoTxt)
-  }
-
-  await enviarListaWA(conn, m, {
-    title     : `📋 Episodios — ${titulo}`,
-    body      : `${episodes.length > 26 ? `Últimos ${epSlice.length} de ${episodes.length} episodios.` : ''}\nElige el episodio a descargar:`,
-    buttonText: 'VER EPISODIOS',
-    sections  : [{ title: `Episodios · ${sitio.nombre}`, rows }],
-  })
-}
 
 function detectarServidor(url) {
   for (const s of CONFIG.servidoresPreferidos) {
@@ -1314,109 +1109,6 @@ async function scrapeAnimeFLV(url) {
   return servidores
 }
 
-// ── VerAnimes ─────────────────────────────────────────────────────────────────
-async function scrapeVerAnimes(url) {
-  const html = await fetchHtml(url)
-  const $ = cheerio.load(html)
-  const servidores = []
-  const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-  if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-  $('script').each((_, el) => {
-    const code = $(el).html() || ''
-    const matchArr = code.match(/var\s+videos\s*=\s*(\[[\s\S]*?\]);/)
-    if (matchArr) {
-      try {
-        const lista = JSON.parse(matchArr[1])
-        for (const item of lista) {
-          if (Array.isArray(item) && typeof item[1] === 'string' && item[1].startsWith('http'))
-            servidores.push({ nombre: String(item[0]).toLowerCase() || detectarServidor(item[1]), url: item[1] })
-          else if (item?.file?.startsWith('http'))
-            servidores.push({ nombre: item.label?.toLowerCase() || detectarServidor(item.file), url: item.file })
-        }
-      } catch (_) {}
-    }
-    if (servidores.length === 0) {
-      const matchObj = code.match(/var\s+videos\s*=\s*(\{[\s\S]*?\});/)
-      if (matchObj) {
-        try {
-          const data = JSON.parse(matchObj[1])
-          const lista = data.SUB || data.LAT || data.ESP || []
-          for (const s of lista) {
-            const videoUrl = s.url || s.code || s.file
-            if (videoUrl) servidores.push({ nombre: s.title?.toLowerCase() || detectarServidor(videoUrl), url: videoUrl })
-          }
-        } catch (_) {}
-      }
-    }
-    const jwMatch = code.match(/file\s*:\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/gi)
-    if (jwMatch) {
-      for (const m of jwMatch) {
-        const u = m.match(/["'](https?:\/\/[^"']+)["']/)?.[1]
-        if (u && !servidores.find(s => s.url === u))
-          servidores.push({ nombre: detectarServidor(u), url: u, directo: true })
-      }
-    }
-  })
-  $('iframe[src]').each((_, el) => {
-    const src = $(el).attr('src')
-    if (src?.startsWith('http')) servidores.push({ nombre: detectarServidor(src), url: src })
-  })
-  extraerUrlsDeScripts($, html, servidores)
-  return servidores
-}
-
-// ── AnimeDBS ──────────────────────────────────────────────────────────────────
-// AnimeDBS expone los videos como links de DESCARGA directa (voe, MEGA, MediaFire)
-// en una sección "Descargar MP4" con botones <a href="...">
-async function scrapeAnimeDBS(url) {
-  const html = await fetchHtml(url)
-  const $    = cheerio.load(html)
-  const servidores = []
-
-  // Interceptado por Puppeteer
-  const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-  if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-
-  // Links de descarga directa en la sección "Descargar MP4"
-  // Estructura: <a href="https://mega.nz/..." ...>MEGA</a>
-  $('a[href]').each((_, el) => {
-    const href  = $(el).attr('href') || ''
-    const label = $(el).text().trim().toLowerCase()
-    if (!href.startsWith('http')) return
-    // Solo links de servidores de video/descarga conocidos
-    const esServidor =
-      href.includes('mega.nz') ||
-      href.includes('mediafire.com') ||
-      href.includes('voe.sx') ||
-      href.includes('streamtape') ||
-      href.includes('filemoon') ||
-      href.includes('mp4upload') ||
-      href.includes('streamwish') ||
-      href.includes('dood') ||
-      href.includes('upstream') ||
-      href.includes('okru') || href.includes('ok.ru') ||
-      href.includes('savefiles') || href.includes('gofile.io') ||
-      href.includes('vidhide')   || href.includes('mixdrop')
-
-    if (esServidor && !servidores.find(s => s.url === href)) {
-      const nombre = label || detectarServidor(href)
-      servidores.push({ nombre, url: normalizarMegaUrl(href) })
-    }
-  })
-
-  // Fallback: scraper genérico si no encontró nada
-  if (servidores.length === 0) {
-    $('iframe[src]').each((_, el) => {
-      const src = $(el).attr('src')
-      if (src?.startsWith('http')) servidores.push({ nombre: detectarServidor(src), url: src })
-    })
-    extraerUrlsDeScripts($, html, servidores)
-  }
-
-  console.log(`[animedbs] ${servidores.length} servidor(es):`, servidores.map(s => s.nombre).join(', '))
-  return servidores
-}
-
 // ── LatAnime ──────────────────────────────────────────────────────────────────
 // LatAnime tiene dos fuentes de video:
 //  1. Tabs de reproductores: data-src / data-player con embed URL
@@ -1575,123 +1267,6 @@ async function scrapeGenerico(url) {
   return servidores
 }
 
-// ── MonosChinos ───────────────────────────────────────────────────────────────
-// Reescrito: 5 estrategias en orden de confiabilidad
-// 1. __NEXT_DATA__ (Next.js SSR — contiene toda la data del episodio)
-// 2. data-player / data-src en tabs (base64 o URL directa)
-// 3. var videos = [[name, url], ...] en scripts inline
-// 4. Links de descarga directa (Mega, Gofile, Mediafire, etc.)
-// 5. iframes + extraerUrlsDeScripts (fallback genérico)
-async function scrapeMonosChinos(url) {
-  const html = await fetchHtml(url)
-  const $    = cheerio.load(html)
-  const servidores = []
-
-  // Interceptado por Puppeteer
-  const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-  if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-
-  // ── 1. __NEXT_DATA__ ─────────────────────────────────────────────────────
-  const nextData = $('script#__NEXT_DATA__').html()
-  if (nextData) {
-    try {
-      const str = JSON.stringify(JSON.parse(nextData))
-      // URLs directas mp4/m3u8
-      for (const [, u] of str.matchAll(/"(https?:\/\/[^"]+\.(?:m3u8|mp4)[^"]*)"/g)) {
-        if (!servidores.find(s => s.url === u))
-          servidores.push({ nombre: detectarServidor(u), url: u, directo: true })
-      }
-      // Campos embed/server/player/code con URL http
-      for (const [, u] of str.matchAll(/"(?:server|embed|player|url|code|src|iframe)"\s*:\s*"(https?:\/\/[^"]+)"/g)) {
-        const norm = normalizarMegaUrl(u)
-        if (!servidores.find(s => s.url === norm))
-          servidores.push({ nombre: detectarServidor(norm), url: norm })
-      }
-    } catch (_) {}
-  }
-
-  // ── 2. Tabs de servidor con data-player / data-src / data-url (base64 o directo) ──
-  $('[data-player], [data-src], [data-url], [data-server], [data-embed], [data-video]').each((_, el) => {
-    for (const attr of ['data-player','data-src','data-url','data-server','data-embed','data-video']) {
-      const raw = $(el).attr(attr)
-      if (!raw) continue
-      let embedUrl = raw
-      try {
-        const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-        if (decoded.startsWith('http')) embedUrl = decoded
-      } catch (_) {}
-      const norm  = normalizarMegaUrl(embedUrl)
-      const label = ($(el).text() || $(el).attr('title') || '').trim().toLowerCase()
-      if (norm.startsWith('http') && !servidores.find(s => s.url === norm))
-        servidores.push({ nombre: label || detectarServidor(norm), url: norm })
-    }
-  })
-
-  // ── 3. var videos = [[name, url], ...] o {SUB:[...]} en scripts inline ───
-  $('script:not([src])').each((_, el) => {
-    const code = $(el).html() || ''
-    if (!code.includes('videos')) return
-
-    // Array de arrays: [[name, url], ...]
-    const mArr = code.match(/var\s+videos\s*=\s*(\[\s*\[[\s\S]*?\]\s*\])\s*[;,]/)
-    if (mArr) {
-      try {
-        for (const item of JSON.parse(mArr[1])) {
-          const u = normalizarMegaUrl(Array.isArray(item) ? item[1] : (item?.url || item?.file || item?.code || ''))
-          const n = Array.isArray(item) ? String(item[0]).toLowerCase() : (item?.title || item?.label || '').toLowerCase()
-          if (u?.startsWith('http') && !servidores.find(s => s.url === u))
-            servidores.push({ nombre: n || detectarServidor(u), url: u })
-        }
-      } catch (_) {}
-    }
-
-    // Objeto: {SUB:[...], LAT:[...], ESP:[...], DUB:[...]}
-    if (servidores.length === 0) {
-      const mObj = code.match(/var\s+videos\s*=\s*(\{[\s\S]*?\})\s*[;,]/)
-      if (mObj) {
-        try {
-          const data  = JSON.parse(mObj[1])
-          const lista = data.SUB || data.LAT || data.ESP || data.DUB || []
-          for (const s of lista) {
-            const u = normalizarMegaUrl(s?.url || s?.code || s?.file || '')
-            if (u?.startsWith('http') && !servidores.find(sv => sv.url === u))
-              servidores.push({ nombre: s?.title?.toLowerCase() || detectarServidor(u), url: u })
-          }
-        } catch (_) {}
-      }
-    }
-  })
-
-  // ── 4. Links de descarga directa (Mega, Gofile, Mediafire, Voe, etc.) ────
-  $('a[href]').each((_, el) => {
-    const href  = $(el).attr('href') || ''
-    const label = $(el).text().trim().toLowerCase()
-    if (!href.startsWith('http')) return
-    const esServidor =
-      href.includes('mega.nz')    || href.includes('mediafire.com') ||
-      href.includes('gofile.io')  || href.includes('voe.sx')        ||
-      href.includes('streamtape') || href.includes('filemoon')      ||
-      href.includes('mp4upload')  || href.includes('streamwish')    ||
-      href.includes('dood')       || href.includes('upstream')      ||
-      href.includes('ok.ru')      || href.includes('vidhide')       ||
-      href.includes('savefiles')  || href.includes('mixdrop')       ||
-      href.includes('lulu')       || href.includes('cloud')
-    if (esServidor && !servidores.find(s => s.url === href))
-      servidores.push({ nombre: label || detectarServidor(href), url: normalizarMegaUrl(href) })
-  })
-
-  // ── 5. iframes + scripts genéricos ──────────────────────────────────────
-  $('iframe[src]').each((_, el) => {
-    const src = $(el).attr('src')
-    if (src?.startsWith('http') && !servidores.find(s => s.url === src))
-      servidores.push({ nombre: detectarServidor(src), url: src })
-  })
-  extraerUrlsDeScripts($, html, servidores)
-
-  console.log(`[monoschinos] ${servidores.length} servidor(es):`, servidores.map(s => s.nombre).join(', '))
-  return servidores
-}
-
 // ── TioAnime ──────────────────────────────────────────────────────────────────
 // NUEVO — fuente: stremio-addon/routes/tioanime.js & tioanime-master/src/api.js
 // Formato: var videos = [[server, url], ...] (array de arrays)
@@ -1751,256 +1326,45 @@ async function scrapeTioAnime(url) {
   return servidores
 }
 
-// ── AnimeAV1 ──────────────────────────────────────────────────────────────────
-// Next.js SSR → __NEXT_DATA__ es la fuente principal
-// URL episodio: https://animeav1.com/media/{slug}/{ep}
-async function scrapeAnimeAV1(url) {
-  const html = await fetchHtml(url)
-  const $    = cheerio.load(html)
-  const servidores = []
-
-  // Interceptado por Puppeteer
-  const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-  if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-
-  // ── 1. __NEXT_DATA__ ─────────────────────────────────────────────────────
-  const nextData = $('script#__NEXT_DATA__').html()
-  if (nextData) {
-    try {
-      const str = JSON.stringify(JSON.parse(nextData))
-      // URLs directas mp4/m3u8
-      for (const [, u] of str.matchAll(/"(https?:\/\/[^"]+\.(?:m3u8|mp4)[^"]*)"/g)) {
-        if (!servidores.find(s => s.url === u))
-          servidores.push({ nombre: detectarServidor(u), url: u, directo: true })
-      }
-      // Campos con URLs de embed/servidor
-      for (const [, u] of str.matchAll(/"(?:server|embed|player|url|code|src|iframe|file|link)"\s*:\s*"(https?:\/\/[^"]+)"/g)) {
-        const norm = normalizarMegaUrl(u)
-        if (!servidores.find(s => s.url === norm))
-          servidores.push({ nombre: detectarServidor(norm), url: norm })
-      }
-    } catch (_) {}
-  }
-
-  // ── 2. data-* attributes (base64 o URL directa) ──────────────────────────
-  $('[data-src], [data-player], [data-url], [data-embed], [data-video], [data-server]').each((_, el) => {
-    for (const attr of ['data-src','data-player','data-url','data-embed','data-video','data-server']) {
-      const raw = $(el).attr(attr)
-      if (!raw) continue
-      let embedUrl = raw
-      try {
-        const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-        if (decoded.startsWith('http')) embedUrl = decoded
-      } catch (_) {}
-      const norm  = normalizarMegaUrl(embedUrl)
-      const label = ($(el).text() || $(el).attr('title') || '').trim().toLowerCase()
-      if (norm.startsWith('http') && !servidores.find(s => s.url === norm))
-        servidores.push({ nombre: label || detectarServidor(norm), url: norm })
-    }
-  })
-
-  // ── 3. iframes ───────────────────────────────────────────────────────────
-  $('iframe[src]').each((_, el) => {
-    const src = $(el).attr('src')
-    if (src?.startsWith('http') && !servidores.find(s => s.url === src))
-      servidores.push({ nombre: detectarServidor(src), url: src })
-  })
-
-  // ── 4. scripts inline ────────────────────────────────────────────────────
-  $('script:not([src])').each((_, el) => {
-    const code = $(el).html() || ''
-    for (const [, u] of code.matchAll(/"(https?:\/\/[^"]+\.(?:m3u8|mp4)[^"]*)"/g)) {
-      if (!servidores.find(s => s.url === u))
-        servidores.push({ nombre: detectarServidor(u), url: u, directo: true })
-    }
-  })
-  extraerUrlsDeScripts($, html, servidores)
-
-  console.log(`[animeav1] ${servidores.length} servidor(es):`, servidores.map(s => s.nombre).join(', '))
-  return servidores
-}
-
-// ── Katanime ──────────────────────────────────────────────────────────────────
-// URL anime:    https://katanime.net/anime/{slug}/
-// URL episodio: https://katanime.net/anime/{slug}/episodio/{ep}
-//               (alternativa: katanime.net/episodio/{slug}-{ep})
-// Estrategia: iframes + data-* + scripts inline (PHP clásico, sin Next.js)
-async function scrapeKatanime(url) {
-  const html = await fetchHtml(url)
-  const $    = cheerio.load(html)
-  const servidores = []
-
-  // Interceptado por Puppeteer
-  const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-  if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-
-  // ── 1. iframes directos ──────────────────────────────────────────────────
-  $('iframe[src]').each((_, el) => {
-    const src = $(el).attr('src')
-    if (src?.startsWith('http') && !servidores.find(s => s.url === src))
-      servidores.push({ nombre: detectarServidor(src), url: src })
-  })
-
-  // ── 2. data-* (base64 o URL directa) ────────────────────────────────────
-  $('[data-src], [data-player], [data-url], [data-video], [data-embed], [data-server]').each((_, el) => {
-    for (const attr of ['data-src','data-player','data-url','data-video','data-embed','data-server']) {
-      const raw = $(el).attr(attr)
-      if (!raw) continue
-      let embedUrl = raw
-      try {
-        const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-        if (decoded.startsWith('http')) embedUrl = decoded
-      } catch (_) {}
-      const norm  = normalizarMegaUrl(embedUrl)
-      const label = ($(el).text() || $(el).attr('title') || '').trim().toLowerCase()
-      if (norm.startsWith('http') && !servidores.find(s => s.url === norm))
-        servidores.push({ nombre: label || detectarServidor(norm), url: norm })
-    }
-  })
-
-  // ── 3. scripts inline: URLs de servidores conocidos ─────────────────────
-  $('script:not([src])').each((_, el) => {
-    const code = $(el).html() || ''
-    // Buscar URLs de servidores de video directamente en el código JS
-    const re = /['"](https?:\/\/[^'"]{15,})['"]/g
-    let m
-    while ((m = re.exec(code)) !== null) {
-      const u = m[1]
-      const esServidor =
-        CONFIG.servidoresPreferidos.some(s => u.includes(s)) ||
-        /mega\.nz|mediafire|streamtape|filemoon|mp4upload|streamwish|dood|voe\.sx|vidhide|mixdrop|ok\.ru/.test(u)
-      if (esServidor && !servidores.find(s => s.url === u))
-        servidores.push({ nombre: detectarServidor(u), url: normalizarMegaUrl(u) })
-    }
-    // var videos = ... (por si lo usan)
-    const mArr = code.match(/var\s+videos\s*=\s*(\[\s*\[[\s\S]*?\]\s*\])\s*[;,]/)
-    if (mArr) {
-      try {
-        for (const item of JSON.parse(mArr[1])) {
-          const u = normalizarMegaUrl(Array.isArray(item) ? item[1] : (item?.url || item?.file || item?.code || ''))
-          const n = Array.isArray(item) ? String(item[0]).toLowerCase() : (item?.title || '').toLowerCase()
-          if (u?.startsWith('http') && !servidores.find(s => s.url === u))
-            servidores.push({ nombre: n || detectarServidor(u), url: u })
-        }
-      } catch (_) {}
-    }
-  })
-
-  // ── 4. links de descarga directa ─────────────────────────────────────────
-  $('a[href]').each((_, el) => {
-    const href  = $(el).attr('href') || ''
-    const label = $(el).text().trim().toLowerCase()
-    if (!href.startsWith('http')) return
-    const esServidor =
-      href.includes('mega.nz') || href.includes('mediafire.com') ||
-      href.includes('voe.sx')  || href.includes('streamtape')    ||
-      href.includes('filemoon')|| href.includes('mp4upload')     ||
-      href.includes('streamwish') || href.includes('dood')       ||
-      href.includes('ok.ru')   || href.includes('vidhide')       ||
-      href.includes('savefiles') || href.includes('gofile.io')   ||
-      href.includes('mixdrop') || href.includes('upstream')
-    if (esServidor && !servidores.find(s => s.url === href))
-      servidores.push({ nombre: label || detectarServidor(href), url: normalizarMegaUrl(href) })
-  })
-
-  // ── 5. fallback genérico ──────────────────────────────────────────────────
-  extraerUrlsDeScripts($, html, servidores)
-
-  console.log(`[katanime] ${servidores.length} servidor(es):`, servidores.map(s => s.nombre).join(', '))
-  return servidores
-}
-
 // ── JKanime ───────────────────────────────────────────────────────────────────
 async function scrapeJKanime(url) {
   const servidores = []
 
-  // ── Helper: resolver redirect /descargar/?url=base64 de JKanime ──────────
-  async function resolverJkRedirect(href) {
-    if (!href) return null
-    try {
-      const u = new URL(href)
-      // Patrón: /descargar/?url=base64url  o  /descargar/?server=X&url=Y
-      const urlParam = u.searchParams.get('url')
-      if (urlParam) {
-        try {
-          const decoded = Buffer.from(urlParam, 'base64').toString('utf-8').trim()
-          if (decoded.startsWith('http')) return normalizarMegaUrl(decoded)
-        } catch (_) {}
-        if (urlParam.startsWith('http')) return normalizarMegaUrl(urlParam)
-      }
-    } catch (_) {}
-    return href
-  }
-
-  // ── Estrategia 0: fetchHtml + INTERCEPTED_VIDEO + tabla de descarga ───────
-  // JKanime muestra tabla Servidor | Tamaño | Audio | Descarga (dinámica via JS)
+  // ── Estrategia 0: Links directos de descarga (tabla "Enlaces de descarga") ─
+  // JKanime muestra una tabla con Servidor / Tamaño / Audio / Descarga
+  // con botones <a href="https://mega.nz/...">Descargar HD</a>
   try {
     const html = await fetchHtml(url)
     const $    = cheerio.load(html)
 
-    // Interceptado por Puppeteer (m3u8/mp4 directo del reproductor)
-    const intercepted = html.match(/INTERCEPTED_VIDEO:(https?:\/\/[^\s"<>\n]+)/)
-    if (intercepted) servidores.push({ nombre: detectarServidor(intercepted[1]), url: intercepted[1], directo: true })
-
-    // Tabla principal de descarga: <tr> con al menos 2 <td> + <a href>
-    const pendientesResolve = []
-    $('table tr, .table-responsive tr').each((_, el) => {
-      const tds   = $(el).find('td')
-      if (tds.length < 2) return
-      const nombre = $(tds.eq(0)).text().trim().toLowerCase()
-      const a      = $(el).find('a[href]').last()
-      const href   = a.attr('href') || ''
-      if (!nombre || !href || nombre === 'servidor') return  // skip header row
-      pendientesResolve.push({ nombre, href })
+    $('a[href]').each((_, el) => {
+      const href  = $(el).attr('href') || ''
+      const label = ($(el).closest('tr').find('td').first().text() || $(el).text()).trim().toLowerCase()
+      if (!href.startsWith('http')) return
+      const esServidor =
+        href.includes('mega.nz') || href.includes('mediafire.com') ||
+        href.includes('voe.sx')  || href.includes('streamtape') ||
+        href.includes('filemoon')|| href.includes('mp4upload') ||
+        href.includes('streamwish') || href.includes('dood') ||
+        href.includes('upstream')|| href.includes('ok.ru') ||
+        href.includes('vidhide') || href.includes('mixdrop') ||
+        href.includes('savefiles') || href.includes('gofile.io')
+      if (esServidor && !servidores.find(s => s.url === href)) {
+        servidores.push({ nombre: label || detectarServidor(href), url: normalizarMegaUrl(href) })
+      }
     })
 
-    // Resolver redirects en paralelo (máx 8 a la vez)
-    for (const { nombre, href } of pendientesResolve) {
-      let realUrl = href
-      if (href.includes('jkanime.net') || href.includes('/descargar/')) {
-        realUrl = await resolverJkRedirect(href).catch(() => href)
-      }
-      if (realUrl?.startsWith('http') && !realUrl.includes('jkanime.net') && !realUrl.includes('javascript:')) {
-        const norm = normalizarMegaUrl(realUrl)
-        if (!servidores.find(s => s.url === norm))
-          servidores.push({ nombre: nombre || detectarServidor(norm), url: norm })
-      }
-    }
-
-    // Fallback: links directos a servidores conocidos (sin tabla)
-    if (servidores.length === 0) {
-      $('a[href]').each((_, el) => {
-        const href  = $(el).attr('href') || ''
-        const label = ($(el).closest('tr').find('td').first().text() || $(el).text()).trim().toLowerCase()
-        if (!href.startsWith('http')) return
-        const esServidor =
-          href.includes('mega.nz') || href.includes('mediafire.com') ||
-          href.includes('voe.sx')  || href.includes('streamtape') ||
-          href.includes('filemoon')|| href.includes('mp4upload') ||
-          href.includes('streamwish') || href.includes('dood') ||
-          href.includes('upstream')|| href.includes('ok.ru') ||
-          href.includes('vidhide') || href.includes('mixdrop') ||
-          href.includes('savefiles') || href.includes('gofile.io')
-        if (esServidor && !servidores.find(s => s.url === href))
-          servidores.push({ nombre: label || detectarServidor(href), url: normalizarMegaUrl(href) })
-      })
-    }
-
     if (servidores.length > 0) {
-      console.log(`[jkanime] ${servidores.length} links E0:`, servidores.map(s => s.nombre).join(', '))
+      console.log(`[jkanime] ${servidores.length} links directos:`, servidores.map(s => s.nombre).join(', '))
       return servidores
     }
-  } catch (e) { console.error('[jkanime] E0:', e.message) }
+  } catch (e) { console.error('[jkanime] links directos:', e.message) }
 
   // ── Estrategia 1: API oficial  (campo `remote` en base64) ────────────────
   const jkMatch = url.match(/jkanime\.net\/([^/]+)\/(\d+)/)
   if (jkMatch) {
     const slug = jkMatch[1], cap = jkMatch[2]
-    const SERVIDORES_JK = [
-      'sw', 'jkvideo', 'okru', 'stape', 'mp4upload', 'filemoon',
-      'voe', 'uqload', 'doodstream', 'vidhide', 'mixdrop', 'streamwish',
-      'desu', 'nozomi', 'jk', 'mediafire', 'mega', 'streamtape',
-    ]
+    const SERVIDORES_JK = ['sw', 'jkvideo', 'okru', 'stape', 'mp4upload', 'filemoon', 'voe', 'uqload', 'doodstream', 'vidhide', 'mixdrop', 'streamwish']
     const headers = {
       ...buildHeaders({ Referer: url }),
       'X-Requested-With': 'XMLHttpRequest',
@@ -2096,10 +1460,10 @@ async function scrapeJKanime(url) {
         if (src.startsWith('http') && !servidores.find(s => s.url === src))
           servidores.push({ nombre: detectarServidor(src), url: src })
       })
-    } catch (e) { console.error('[jkanime] E2 HTML parse:', e.message) }
+    } catch (e) { console.error('[jkanime] HTML parse:', e.message) }
   }
 
-  // ── Estrategia 3: Puppeteer con extracción explícita de tabla ────────────
+  // ── Estrategia 3: Puppeteer ───────────────────────────────────────────────
   if (servidores.length === 0) {
     console.log('[jkanime] Usando Puppeteer...')
     try {
@@ -2133,6 +1497,7 @@ async function scrapeJKanime(url) {
         if (rUrl.includes('/ajax/episode/') || rUrl.includes('/stream/')) {
           try {
             const json = await response.json()
+            // Decodificar remote en base64 también aquí
             if (json?.remote) {
               try {
                 let d = json.remote
@@ -2148,83 +1513,22 @@ async function scrapeJKanime(url) {
         }
         if (/\.(m3u8|mp4)/.test(rUrl) && !captured.includes(rUrl)) captured.push(rUrl)
       })
-
       try { await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 }) } catch (_) {}
-
-      // Esperar tabla de descargas (hasta 8 s)
-      try { await page.waitForSelector('table tbody tr td, .table-responsive table td', { timeout: 8000 }) } catch (_) {}
-      await new Promise(r => setTimeout(r, 2000))
-
-      // Extraer tabla de descargas via DOM (browser context — devuelve nombre + href resuelto)
-      const tableLinks = await page.evaluate(() => {
-        const links = []
-        const seen  = new Set()
-        // Tabla principal
-        document.querySelectorAll('table tbody tr, .table-responsive table tr').forEach(row => {
-          const tds = row.querySelectorAll('td')
-          const a   = row.querySelector('a[href]')
-          if (tds.length >= 2 && a?.href && !seen.has(a.href)) {
-            const nombre = (tds[0].textContent || '').trim().toLowerCase()
-            if (nombre && nombre !== 'servidor') {
-              seen.add(a.href)
-              links.push({ nombre, url: a.href })
-            }
-          }
-        })
-        // Fallback: botones "Descargar HD" / "Descargar"
-        if (links.length === 0) {
-          document.querySelectorAll('a[href]').forEach(a => {
-            if (!a.href || seen.has(a.href)) return
-            const txt = (a.textContent || '').trim().toLowerCase()
-            if (!txt.includes('descargar')) return
-            const row = a.closest('tr')
-            const serverName = row ? (row.querySelector('td')?.textContent || '').trim().toLowerCase() : txt
-            seen.add(a.href)
-            links.push({ nombre: serverName || 'descarga', url: a.href })
-          })
-        }
-        return links
-      })
-
-      // Resolver redirects JKanime en tableLinks (Node.js context)
-      for (const { nombre, url: dlUrl } of tableLinks) {
-        if (!dlUrl) continue
-        let realUrl = dlUrl
-        if (dlUrl.includes('jkanime.net') || dlUrl.includes('/descargar/')) {
-          realUrl = await resolverJkRedirect(dlUrl).catch(() => dlUrl)
-        }
-        if (realUrl?.startsWith('http') && !realUrl.includes('jkanime.net')) {
-          const norm = normalizarMegaUrl(realUrl)
-          if (!captured.includes(norm)) captured.push({ nombre, url: norm })
-        }
-      }
-
-      // Intentar clicks en botones del reproductor (tab de servidores)
       try {
         const botones = await page.$$('.server-item, [data-server], .nav-server a, .servidor-btn, button[data-s]')
         for (const btn of botones.slice(0, 6)) {
           try { await btn.click(); await new Promise(r => setTimeout(r, 1500)) } catch (_) {}
         }
       } catch (_) {}
-
-      // Iframes del reproductor
       const iframes = await page.evaluate(() =>
         [...document.querySelectorAll('iframe[src]')].map(f => f.src).filter(s => s.startsWith('http'))
       )
       for (const src of iframes) {
-        if (!captured.some(c => (typeof c === 'string' ? c : c.url) === src)) captured.push(src)
+        if (!captured.includes(src)) captured.push(src)
       }
       await browser.close()
-
-      // Construir servidores desde captured (mezcla de strings y {nombre, url})
-      for (const item of captured) {
-        if (typeof item === 'object' && item.url) {
-          if (!servidores.find(s => s.url === item.url))
-            servidores.push({ nombre: item.nombre || detectarServidor(item.url), url: item.url, directo: /\.(m3u8|mp4)/.test(item.url) })
-        } else if (typeof item === 'string') {
-          if (!servidores.find(s => s.url === item))
-            servidores.push({ nombre: detectarServidor(item), url: item, directo: /\.(m3u8|mp4)/.test(item) })
-        }
+      for (const u of captured) {
+        servidores.push({ nombre: detectarServidor(u), url: u, directo: /\.(m3u8|mp4)/.test(u) })
       }
     } catch (e) { console.error('[jkanime] Puppeteer:', e.message) }
   }
@@ -2278,26 +1582,6 @@ async function buscarEnAnimeFLV(nombre, episodio, temporada = 1) {
   return `https://www3.animeflv.net/ver/${slug}-${episodio}`
 }
 
-// ── VerAnimes ─────────────────────────────────────────────────────────────────
-async function buscarEnVerAnimes(nombre, episodio, temporada = 1) {
-  const query = temporada > 1 ? `${nombre} temporada ${temporada}` : nombre
-  const html  = await fetchHtml(`https://wwv.veranimes.net/?s=${encodeURIComponent(query)}`)
-  const $     = cheerio.load(html)
-
-  const links = []
-  $('article a, .item a, h2 a, .title a').each((_, el) => {
-    const href  = $(el).attr('href') || ''
-    const title = $(el).text().trim().toLowerCase()
-    if (href) links.push({ href, title })
-  })
-  if (links.length === 0) return null
-
-  const elegido   = elegirPorTemporada(links, temporada) || mejorMatch(links, nombre)
-  const slugMatch = elegido.href.match(/\/(?:anime|ver)\/([^/]+?)(?:-\d+)?$/)
-  if (!slugMatch) return null
-  return `https://wwv.veranimes.net/ver/${slugMatch[1].replace(/-\d+$/, '')}-${episodio}`
-}
-
 // ── LatAnime ──────────────────────────────────────────────────────────────────
 async function buscarEnLatAnime(nombre, episodio, temporada = 1) {
   const query = temporada > 1 ? `${nombre} temporada ${temporada}` : nombre
@@ -2330,98 +1614,6 @@ async function buscarEnLatAnime(nombre, episodio, temporada = 1) {
   if (!slugMatch) return null
   const slugBase = slugMatch[1].replace(/-episodio-\d+$/, '')
   return `https://latanime.org/ver/${slugBase}-episodio-${episodio}`
-}
-
-// ── MonosChinos ───────────────────────────────────────────────────────────────
-// URL anime:    https://monoschinos2.com/anime/{slug}-sub-espanol
-// URL episodio: https://monoschinos2.com/ver/{slug}-episodio-{ep}
-// OJO: el slug del episodio NO lleva "-sub-espanol" al final
-async function buscarEnMonosChinos(nombre, episodio, temporada = 1) {
-  const query = temporada > 1 ? `${nombre} temporada ${temporada}` : nombre
-
-  const dominios = [
-    `https://monoschinos2.com/buscar?q=${encodeURIComponent(query)}`,
-    `https://www.monoschinos2.com/buscar?q=${encodeURIComponent(query)}`,
-  ]
-
-  let links = []
-  for (const searchUrl of dominios) {
-    try {
-      const html = await fetchHtml(searchUrl)
-      const $    = cheerio.load(html)
-      $('a[href*="/anime/"], .col a, article a, .card a').each((_, el) => {
-        const href  = $(el).attr('href') || ''
-        const title = ($(el).attr('title') || $(el).find('h3, h2, span').first().text() || $(el).text()).trim().toLowerCase()
-        if (href.includes('/anime/') && !links.find(l => l.href === href))
-          links.push({ href, title })
-      })
-      if (links.length > 0) break
-    } catch (_) {}
-  }
-
-  if (links.length === 0) {
-    // Fallback: slug directo normalizado
-    const slugBase = normalizarTitulo(nombre).replace(/\s+/g, '-')
-    const candidatos = temporada > 1
-      ? [`${slugBase}-temporada-${temporada}`, `${slugBase}-${temporada}nd-season`, slugBase]
-      : [slugBase]
-    for (const slug of candidatos) {
-      const epUrl = `https://monoschinos2.com/ver/${slug}-episodio-${episodio}`
-      try {
-        const res = await fetch(epUrl, { headers: buildHeaders({ Referer: 'https://monoschinos2.com/' }), timeout: 8000, redirect: 'manual' })
-        if (res.status === 200) return epUrl
-      } catch (_) {}
-    }
-    return null
-  }
-
-  const elegido = mejorMatch(links, nombre) || elegirPorTemporada(links, temporada) || links[0]
-
-  // Extraer slug base limpiando sufijos que MonosChinos agrega a la URL del anime
-  // pero que NO aparecen en la URL del episodio
-  let animeId = elegido.href.split('/').filter(Boolean).pop() || ''
-  animeId = animeId
-    .replace(/-sub-espanol$/, '')
-    .replace(/-sub-latino$/, '')
-    .replace(/-latino$/, '')
-    .replace(/-espanol$/, '')
-    .replace(/-doblado$/, '')
-    .replace(/-dub$/, '')
-
-  if (!animeId || ['buscar', 'anime', 'ver', 'categoria', 'contacto'].includes(animeId)) return null
-
-  const base = new URL(elegido.href).origin
-  return `${base}/ver/${animeId}-episodio-${episodio}`
-}
-
-// ── AnimeDBS ──────────────────────────────────────────────────────────────────
-async function buscarEnAnimeDBS(nombre, episodio, temporada = 1) {
-  const base  = temporada > 1 ? `${nombre} temporada ${temporada}` : nombre
-  const query = `${base} episodio ${episodio}`
-  const html  = await fetchHtml(`https://www.animedbs.online/?s=${encodeURIComponent(query)}`)
-  const $     = cheerio.load(html)
-
-  const links = []
-  $('article a, h2 a, .entry-title a').each((_, el) => {
-    const href  = $(el).attr('href') || ''
-    const title = ($(el).attr('title') || $(el).text()).trim()
-    if (href.startsWith('http') && title)
-      links.push({ href, title })
-  })
-
-  if (links.length === 0) return null
-
-  // Elegir el resultado más parecido al nombre buscado
-  const elegido = mejorMatch(links, nombre)
-
-  // Score < 25 → anime equivocado, no devolver nada
-  if (!elegido || elegido.score < 25) {
-    console.log(`[animedbs] descartado — mejor match "${elegido?.title}" (score ${elegido?.score}) no corresponde a "${nombre}"`)
-    return null
-  }
-
-  console.log(`[animedbs] elegido "${elegido.title}" (score ${elegido.score})`)
-  return elegido.href
 }
 
 // ── JKanime ───────────────────────────────────────────────────────────────────
@@ -2533,153 +1725,6 @@ async function buscarEnTioAnime(nombre, episodio, temporada = 1) {
   if (!slugMatch) return null
   const slug = slugMatch[1]
   return `https://tioanime.com/ver/${slug}-${episodio}`
-}
-
-// ── AnimeAV1 ──────────────────────────────────────────────────────────────────
-// URL catálogo:  https://animeav1.com/catalogo?q={query}
-// URL anime:     https://animeav1.com/media/{slug}
-// URL episodio:  https://animeav1.com/media/{slug}/{ep}
-async function buscarEnAnimeAV1(nombre, episodio, temporada = 1) {
-  const query = temporada > 1 ? `${nombre} ${temporada}` : nombre
-
-  // Estrategia 1: catálogo con q= (busca en __NEXT_DATA__ primero)
-  try {
-    const html = await fetchHtml(`https://animeav1.com/catalogo?q=${encodeURIComponent(query)}`)
-    const $    = cheerio.load(html)
-
-    // __NEXT_DATA__ de Next.js → pageProps.animes / data[]
-    const nextRaw = $('script#__NEXT_DATA__').html()
-    if (nextRaw) {
-      try {
-        const data   = JSON.parse(nextRaw)
-        const animes = (
-          data.props?.pageProps?.animes ||
-          data.props?.pageProps?.data   ||
-          data.props?.pageProps?.results || []
-        )
-        if (Array.isArray(animes) && animes.length > 0) {
-          const items = animes.map(a => ({
-            href : a.slug || a.id || '',
-            title: (a.title || a.name || a.titulo || '').toLowerCase(),
-          })).filter(i => i.href)
-          const elegido = mejorMatch(items, nombre) || elegirPorTemporada(items, temporada) || items[0]
-          return `https://animeav1.com/media/${elegido.href}/${episodio}`
-        }
-      } catch (_) {}
-    }
-
-    // Fallback HTML: links /media/{slug}
-    const links = []
-    $('a[href*="/media/"]').each((_, el) => {
-      const href  = $(el).attr('href') || ''
-      const title = ($(el).attr('title') || $(el).find('h2,h3,span').first().text() || $(el).text()).trim().toLowerCase()
-      // Solo URLs de anime (sin número de episodio al final)
-      const slugMatch = href.match(/\/media\/([a-z0-9][a-z0-9-]+)\/?$/)
-      if (slugMatch && !links.find(l => l.href === slugMatch[1]))
-        links.push({ href: slugMatch[1], title: title || slugMatch[1] })
-    })
-    if (links.length > 0) {
-      const elegido = mejorMatch(links, nombre) || elegirPorTemporada(links, temporada) || links[0]
-      return `https://animeav1.com/media/${elegido.href}/${episodio}`
-    }
-  } catch (e) { console.error('[animeav1] búsqueda catálogo:', e.message) }
-
-  // Estrategia 2: slug directo normalizado
-  try {
-    const slugBase = normalizarTitulo(nombre).replace(/\s+/g, '-')
-    const candidatos = temporada > 1
-      ? [`${slugBase}-${temporada}nd-season`, `${slugBase}-season-${temporada}`, `${slugBase}-temporada-${temporada}`, slugBase]
-      : [slugBase]
-    for (const slug of candidatos) {
-      const epUrl = `https://animeav1.com/media/${slug}/${episodio}`
-      try {
-        const res = await fetch(epUrl, { headers: buildHeaders({ Referer: 'https://animeav1.com/' }), timeout: 8000, redirect: 'manual' })
-        if (res.status === 200) return epUrl
-        if (res.status === 301 || res.status === 302) return res.headers.get('location') || epUrl
-      } catch (_) {}
-    }
-  } catch (e) { console.error('[animeav1] slug directo:', e.message) }
-
-  return null
-}
-
-// ── Katanime ──────────────────────────────────────────────────────────────────
-// URL anime:    https://katanime.net/anime/{slug}/
-// URL episodio: https://katanime.net/anime/{slug}/episodio/{ep}
-//              (alternativa encontrada en la página del anime)
-async function buscarEnKatanime(nombre, episodio, temporada = 1) {
-  const query = temporada > 1 ? `${nombre} ${temporada}` : nombre
-
-  // Estrategia 1: búsqueda vía /animes?q=
-  try {
-    const html = await fetchHtml(`https://katanime.net/animes?q=${encodeURIComponent(query)}`)
-    const $    = cheerio.load(html)
-    const links = []
-    $('a[href*="/anime/"]').each((_, el) => {
-      const href  = $(el).attr('href') || ''
-      const title = ($(el).attr('title') || $(el).find('h2,h3,.title,span').first().text() || $(el).text()).trim().toLowerCase()
-      const slugMatch = href.match(/\/anime\/([^/?#]+)\/?/)
-      if (slugMatch && !links.find(l => l.href === href))
-        links.push({ href, title: title || slugMatch[1] })
-    })
-    if (links.length > 0) {
-      const elegido   = mejorMatch(links, nombre) || elegirPorTemporada(links, temporada) || links[0]
-      const slugMatch = elegido.href.match(/\/anime\/([^/?#]+)/)
-      if (slugMatch) {
-        const epUrl = await katanimeGetEpUrl(slugMatch[1], episodio)
-        if (epUrl) return epUrl
-      }
-    }
-  } catch (e) { console.error('[katanime] búsqueda:', e.message) }
-
-  // Estrategia 2: slug directo
-  try {
-    const slugBase = normalizarTitulo(nombre).replace(/\s+/g, '-')
-    const candidatos = temporada > 1
-      ? [`${slugBase}-${temporada}nd-season`, `${slugBase}-season-${temporada}`, `${slugBase}-temporada-${temporada}`, slugBase]
-      : [slugBase]
-    for (const slug of candidatos) {
-      const epUrl = await katanimeGetEpUrl(slug, episodio)
-      if (epUrl) return epUrl
-    }
-  } catch (e) { console.error('[katanime] slug directo:', e.message) }
-
-  return null
-}
-
-// Helper: dado un slug de Katanime, devuelve la URL del episodio N
-async function katanimeGetEpUrl(slug, episodio) {
-  // Formato 1: /anime/{slug}/episodio/{ep} (más común en PHP)
-  const directUrl = `https://katanime.net/anime/${slug}/episodio/${episodio}`
-  try {
-    const res = await fetch(directUrl, { headers: buildHeaders({ Referer: `https://katanime.net/anime/${slug}/` }), timeout: 8000, redirect: 'manual' })
-    if (res.status === 200) return directUrl
-    if (res.status === 301 || res.status === 302) {
-      const loc = res.headers.get('location')
-      if (loc && loc.includes('katanime.net')) return loc
-    }
-  } catch (_) {}
-
-  // Formato 2: parsear la página del anime y buscar el link del ep correcto
-  try {
-    const animeUrl = `https://katanime.net/anime/${slug}/`
-    const html = await fetchHtml(animeUrl)
-    const $    = cheerio.load(html)
-    let epUrl  = null
-    $('a[href]').each((_, el) => {
-      const href = $(el).attr('href') || ''
-      // Detectar links de episodio: /episodio/, /capitulo/, o número al final
-      const mEp = href.match(/(?:episodio|capitulo|ep)[/-](\d+)|\/(\d+)\/?$/)
-      if (mEp) {
-        const num = parseInt(mEp[1] || mEp[2])
-        if (num === episodio && !epUrl) {
-          epUrl = href.startsWith('http') ? href : `https://katanime.net${href}`
-        }
-      }
-    })
-    return epUrl || null
-  } catch (_) {}
-  return null
 }
 
 // ─── Descarga con yt-dlp ──────────────────────────────────────────────────────
@@ -2864,14 +1909,23 @@ async function ejecutarDescargaServidor(listaIntentos, indiceInicio = 0, pick, m
         await updateStatus(`📥 *MediaFire:* ${name}\n⚖️ ${sizeH}\n_Descargando..._`)
         const tempPath = path.join(tmpDir, name.replace(/[/\\:*?"<>|]/g, '_'))
         const response = await axios({ method: 'get', url: downloadUrl, responseType: 'stream', httpsAgent })
-        let dld = 0
+        let dld = 0, mfLastTime = Date.now(), mfLastDld = 0
         response.data.on('data', chunk => {
           dld += chunk.length
-          const p = sizeBytes ? ((dld / sizeBytes) * 100).toFixed(1) : '?'
-          process.stdout.write(`\r[MF] ${p}% | ${(dld / 1024 / 1024).toFixed(2)} MB`)
+          const now = Date.now()
+          const dt  = (now - mfLastTime) / 1000
+          if (dt >= 0.5) {
+            const speed = ((dld - mfLastDld) / dt / 1024 / 1024).toFixed(1)
+            mfLastTime  = now
+            mfLastDld   = dld
+            const p     = sizeBytes ? ((dld / sizeBytes) * 100).toFixed(1) : '?'
+            const dlMB  = (dld / 1024 / 1024).toFixed(1)
+            const totMB = sizeBytes ? (sizeBytes / 1024 / 1024).toFixed(1) : '?'
+            process.stdout.write(`\r[MediaFire] ${p}% | ${dlMB} MB / ${totMB} MB | ${speed} MB/s`)
+          }
         })
         await pipeline(response.data, fs.createWriteStream(tempPath))
-        console.log(`\n[MF] ✅ ${name}`)
+        console.log(`\n[MediaFire] ✅ ${name}`)
         archivoPath = tempPath
         break
       }
@@ -2938,24 +1992,7 @@ async function ejecutarDescargaServidor(listaIntentos, indiceInicio = 0, pick, m
 
   try {
     const sizeMB  = fs.statSync(archivoPath).size / 1024 / 1024
-    // ── Construir nombre de archivo limpio: "Nombre Anime - Episodio XX.mp4" ──
-    const ext = path.extname(archivoPath) || '.mp4'
-    let cleanName = path.basename(archivoPath).replace(/_c\.mp4$/, '.mp4')
-
-    if (argsParaAnime && argsParaAnime.length >= 2) {
-      // Extraer nombre y episodio de argsParaAnime (ej: ['solo', 'leveling', '5'])
-      const lastTok = argsParaAnime[argsParaAnime.length - 1]
-      const epNum   = !isNaN(lastTok) ? parseInt(lastTok) : null
-      if (epNum !== null) {
-        const nombreTokens = argsParaAnime.slice(0, -1).filter(t => !/^t\d+$/i.test(t))
-        const nombreAnime  = nombreTokens
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ')
-        cleanName = `${nombreAnime} - Episodio ${String(epNum).padStart(2, '0')}${ext}`
-      }
-    }
-
-    const fileName = cleanName
+    const fileName = path.basename(archivoPath).replace(/_c\.mp4$/, '.mp4')
     const caption  = `🎌 *${fileName.replace(/\.[^.]+$/, '')}*\n📦 ${sizeMB.toFixed(1)} MB · KanaArima-MD`
 
     await updateStatus(`⬆️ Subiendo a WhatsApp...`)
@@ -2996,17 +2033,17 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
 
   // ── .anilist ──────────────────────────────────────────────────────────────
   if (command === 'anilist') {
-    const lista = SITIOS.map((s, i) => `*${numToLetter(i).toUpperCase()}.* ${s.nombre}\n   🔗 ${s.url}`).join('\n\n')
+    const lista = SITIOS.map(s => `*${s.id}.* ${s.nombre}\n   🔗 ${s.url}`).join('\n\n')
     return m.reply(
       `*🎌 Sitios de Anime Disponibles*\n\n${lista}\n\n` +
       `*¿Cómo usar?*\n` +
       `• *.animedl <nombre> <ep>*\n` +
       `• *.animedl <nombre> t<N> <ep>*\n` +
-      `• *.animedl <LETRA> <nombre> t<N> <ep>*\n\n` +
+      `• *.animedl <S> <nombre> t<N> <ep>*\n\n` +
       `*Ejemplos:*\n` +
       `  .animedl one piece 1100\n` +
       `  .animedl shingeki no kyojin t4 1\n` +
-      `  .animedl G naruto shippuden t2 30\n\n` +
+      `  .animedl 7 naruto shippuden t2 30\n\n` +
       `_t<N> = temporada. Sin t = temporada 1_`
     )
   }
@@ -3027,7 +2064,12 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
   if (/^[a-z]$/.test(letraInput)) {
     const animeSearch = global.pendingAnimeSearch.get(m.chat)
     if (animeSearch) {
-      if (animeSearch.owner && animeSearch.owner !== m.sender) return
+      if (animeSearch.owner && animeSearch.owner !== m.sender) {
+        return conn.sendMessage(m.chat,
+          { text: `⛔ @${m.sender.split('@')[0]}, esta selección pertenece a otro usuario.` },
+          { quoted: m, mentions: [m.sender] }
+        )
+      }
       const idxSearch = letraInput.charCodeAt(0) - 97  // a=0, b=1, …
       const elegido   = animeSearch.resultados[idxSearch]
       if (!elegido) return m.reply(`❌ Letra inválida. Elige entre *a* y *${numToLetter(animeSearch.resultados.length - 1)}*.`)
@@ -3041,7 +2083,12 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
     const pick = global.pendingServerPicks.get(m.chat)
     if (pick) {
       // Solo el usuario que inició puede elegir
-      if (pick.owner && pick.owner !== m.sender) return
+      if (pick.owner && pick.owner !== m.sender) {
+        return conn.sendMessage(m.chat,
+          { text: `⛔ @${m.sender.split('@')[0]}, esta selección pertenece a otro usuario.` },
+          { quoted: m, mentions: [m.sender] }
+        )
+      }
       const raw = text.trim().toLowerCase()
       const num = /^[a-z]$/.test(raw) ? raw.charCodeAt(0) - 96 : parseInt(raw)  // a=1, b=2, …
       if (num < 1 || num > pick.servers.length) {
@@ -3063,12 +2110,12 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
       `• *.anilist* — Ver sitios disponibles (${SITIOS.length} sitios)\n` +
       `• *.animedl <nombre> <ep>* — Buscar en todos\n` +
       `• *.animedl <nombre> t<N> <ep>* — Temporada N\n` +
-      `• *.animedl <LETRA> <nombre> t<N> <ep>* — Sitio por letra + temporada N\n` +
+      `• *.animedl <S> <nombre> t<N> <ep>* — Sitio S + temporada N\n` +
       `• *.animedl <url>* — URL directa del episodio\n` +
       `• *.animedl <url mega/mediafire>* — Descargar archivo\n\n` +
       `*Ejemplos:*\n` +
       `  .animedl shingeki no kyojin t4 1\n` +
-      `  .animedl G naruto 1\n\n` +
+      `  .animedl 7 tioanime naruto 1\n\n` +
       `_Usa .anilist para ver los números de sitio_`
     )
   }
@@ -3168,13 +2215,23 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
 
         const ax2      = await import('axios')
         const response = await ax2.default({ method: 'get', url: downloadUrl, responseType: 'stream', signal, httpsAgent })
-        let dld = 0
+        let dld = 0, mfLastTime = Date.now(), mfLastDld = 0
         response.data.on('data', (chunk) => {
           dld += chunk.length
-          const p = sizeBytes ? ((dld / sizeBytes) * 100).toFixed(1) : '?'
-          process.stdout.write(`\r[MF] ${p}% | ${(dld / 1024 / 1024).toFixed(2)} MB`)
+          const now = Date.now()
+          const dt  = (now - mfLastTime) / 1000
+          if (dt >= 0.5) {
+            const speed = ((dld - mfLastDld) / dt / 1024 / 1024).toFixed(1)
+            mfLastTime  = now
+            mfLastDld   = dld
+            const p     = sizeBytes ? ((dld / sizeBytes) * 100).toFixed(1) : '?'
+            const dlMB  = (dld / 1024 / 1024).toFixed(1)
+            const totMB = sizeBytes ? (sizeBytes / 1024 / 1024).toFixed(1) : '?'
+            process.stdout.write(`\r[MediaFire] ${p}% | ${dlMB} MB / ${totMB} MB | ${speed} MB/s`)
+          }
         })
         await pipeline(response.data, fs.createWriteStream(tempPath), { signal })
+        console.log(`\n[MediaFire] ✅ ${name}`)
 
         await conn.sendMessage(m.chat, { text: `⬆️ Subiendo a WhatsApp...`, edit: key })
         await conn.sendMessage(m.chat, {
@@ -3203,13 +2260,10 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
   let sitioElegido  = null
   let argsParaAnime = rawArgs
 
-  if (/^(\d+|[a-zA-Z])$/.test(rawArgs[0]) && rawArgs.length >= 2) {
-    const raw0  = rawArgs[0].toLowerCase()
-    const idNum = /^[a-z]$/.test(raw0)
-      ? raw0.charCodeAt(0) - 96          // a=1, b=2, … h=8
-      : parseInt(raw0)
-    const sitioCandidate = getSitioPorId(idNum)
-    if (sitioCandidate) {
+  if (/^\d+$/.test(rawArgs[0]) && rawArgs.length >= 3) {
+    const idNum           = parseInt(rawArgs[0])
+    const sitioCandidate  = getSitioPorId(idNum)
+    if (sitioCandidate && !isNaN(rawArgs[rawArgs.length - 1])) {
       sitioElegido  = sitioCandidate
       argsParaAnime = rawArgs.slice(1)
     }
@@ -3244,43 +2298,11 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
         try { await conn.sendMessage(m.chat, { text: txt, edit: statusKey }) } catch (_) {}
       }
 
-      // ── Sitio específico elegido → info + episodios desde ese sitio ────────
-      if (sitioElegido) {
-        // AnimeFLV tiene scraper dedicado más rico, usarlo si corresponde
-        if (sitioElegido.dominio === 'animeflv') {
-          const resultados = await buscarResultadosAnimeFLV(nombreBusq, temporada)
-          if (resultados.length === 0)
-            return editStatus(`❌ No encontré *${nombreBusq}* en AnimeFLV.\nPrueba con:\n  ${usedPrefix}animedl ${nombreBusq} 1`)
-          if (resultados.length === 1 || puntuarMatch(resultados[0].title, nombreBusq) >= 85)
-            return mostrarInfoYEpisodios(resultados[0], m, conn, usedPrefix, temporada, statusKey)
-          // Múltiples resultados AnimeFLV
-          await editStatus(`🔍 *${resultados.length} resultados en AnimeFLV* — elige uno:`)
-          const maxR = Math.min(resultados.length, 26)
-          global.pendingAnimeSearch.set(m.chat, { resultados: resultados.slice(0, maxR), nombre: nombreBusq, temporada, owner: m.sender, timestamp: Date.now(), usedPrefix })
-          return enviarListaWA(conn, m, {
-            title: `🔍 Resultados en AnimeFLV`, body: `Elige el anime correcto:`, buttonText: 'ELEGIR ANIME',
-            sections: [{ title: 'Animes encontrados', rows: resultados.slice(0, maxR).map(r => ({ title: r.title, description: 'AnimeFLV', id: `__animeselect__${r.slug}` })) }],
-          })
-        }
-        // Resto de sitios → scraper genérico
-        return mostrarInfoYEpisodiosGenerico(nombreBusq, temporada, sitioElegido, m, conn, usedPrefix, statusKey)
-      }
-
-      // ── Sin sitio específico → AnimeFLV primero, luego resto de sitios ──────
       const resultados = await buscarResultadosAnimeFLV(nombreBusq, temporada)
 
       if (resultados.length === 0) {
-        // AnimeFLV no encontró nada → probar en el resto de sitios
-        await editStatus(`🔎 No encontrado en AnimeFLV, buscando en otros sitios...`)
-        for (const sitio of SITIOS.filter(s => s.dominio !== 'animeflv')) {
-          let epUrl = null
-          try { epUrl = await sitio.buscar(nombreBusq, 1, temporada) } catch (_) {}
-          if (epUrl) {
-            return mostrarInfoYEpisodiosGenerico(nombreBusq, temporada, sitio, m, conn, usedPrefix, statusKey)
-          }
-        }
         return editStatus(
-          `❌ No encontré ningún anime llamado *${nombreBusq}* en ningún sitio.\n\n` +
+          `❌ No encontré ningún anime llamado *${nombreBusq}*.\n\n` +
           `Prueba con el sitio + episodio:\n  ${usedPrefix}animedl ${nombreBusq} 1`
         )
       }
@@ -3346,7 +2368,7 @@ const handler = async (m, { conn, text, args, usedPrefix, command }) => {
           `❌ No encontré *${nombre}* ep *${episodio}*${temporada > 1 ? ` (temporada ${temporada})` : ''} en *${sitioElegido.nombre}*.\n\n` +
           `Prueba con otro sitio:\n` +
           SITIOS.filter(s => s.id !== sitioElegido.id)
-                .map(s => `  .animedl ${numToLetter(s.id - 1).toUpperCase()} ${nombre}${tSuffix} ${episodio}`)
+                .map(s => `  .animedl ${s.id} ${nombre}${tSuffix} ${episodio}`)
                 .join('\n')
         )
       }
@@ -3517,7 +2539,13 @@ handler.before = async function (m, { conn }) {
         const animeSearch = global.pendingAnimeSearch.get(m.chat)
         if (!animeSearch) return false
 
-        if (animeSearch.owner && animeSearch.owner !== m.sender) return true
+        if (animeSearch.owner && animeSearch.owner !== m.sender) {
+          await conn.sendMessage(m.chat,
+            { text: `⛔ @${m.sender.split('@')[0]}, estos botones son de otro usuario.` },
+            { quoted: m, mentions: [m.sender] }
+          )
+          return true
+        }
 
         global.pendingAnimeSearch.delete(m.chat)
         const elegido = animeSearch.resultados.find(r => r.slug === slug)
@@ -3531,7 +2559,13 @@ handler.before = async function (m, { conn }) {
       if (!pick) return false
 
       // Solo el owner puede usar los botones
-      if (pick.owner && pick.owner !== m.sender) return true
+      if (pick.owner && pick.owner !== m.sender) {
+        await conn.sendMessage(m.chat,
+          { text: `⛔ @${m.sender.split('@')[0]}, estos botones son de otro usuario.` },
+          { quoted: m, mentions: [m.sender] }
+        )
+        return true
+      }
 
       // Inyectar el comando (.dl N) para que el handler principal lo procese
       const sk = `${m.chat}|${m.sender}`
