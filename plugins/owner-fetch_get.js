@@ -3,6 +3,11 @@ import { format } from 'util'
 import fs from 'fs'
 
 const handler = async (m, {conn, text, usedPrefix}) => {
+  // Función para reaccionar compatible con todas las versiones
+  const react = async (emoji) => {
+    await conn.sendMessage(m.chat, { react: { text: emoji, key: m.key } })
+  }
+
   try {
     const datas = global
     const idioma = datas.db.data.users[m.sender]?.language || global.defaultLenguaje || 'es'
@@ -12,13 +17,13 @@ const handler = async (m, {conn, text, usedPrefix}) => {
     if (!text) throw `*Uso:* ${usedPrefix}fetch https://ejemplo.com/api.js`
     if (!/^https?:\/\//.test(text)) throw tradutor.texto1
 
-    m.react('⏳') // Reacciona mientras descarga
+    await react('⏳')
 
     const res = await fetch(text, { timeout: 20000 })
     
     const size = res.headers.get('content-length')
-    if (size > 10 * 1024) { // 10 MB máximo para código
-      throw `*Archivo muy pesado:* ${(size / 1024).toFixed(2)} MB. Máx 10 MB para código`
+    if (size > 10 * 1024 * 1024) { // 10 MB máximo
+      throw `*Archivo muy pesado:* ${(size / 1024).toFixed(2)} MB. Máx 10 MB`
     }
     
     const contentType = res.headers.get('content-type') || ''
@@ -26,7 +31,7 @@ const handler = async (m, {conn, text, usedPrefix}) => {
     // Si es binario: imagen, video, zip, lo manda como archivo
     if (!/text|json|javascript|html|css|xml/.test(contentType)) {
       await conn.sendFile(m.chat, text, 'archivo', `*Tipo:* ${contentType}\n*URL:* ${text}`, m)
-      return m.react('✅')
+      return await react('✅')
     }
     
     let code = await res.text()
@@ -46,19 +51,19 @@ const handler = async (m, {conn, text, usedPrefix}) => {
       } catch {}
     }
     
-    // Corta si es muy largo. WhatsApp aguanta 65k pero se lagea
+    // Corta si es muy largo
     if (code.length > 60000) {
       code = code.slice(0, 60000) + '\n\n...[CORTADO: archivo muy largo]'
     }
     
-    // ✅ Manda como yo: bloque de código con lenguaje
+    // Manda en bloque de código como yo
     const msg = `\`\`\`${lang}\n${code}\n\`\`\``
     await m.reply(msg)
-    m.react('✅')
+    await react('✅')
     
   } catch (e) {
     console.error('[FETCH]', e)
-    m.react('❌')
+    await react('❌')
     throw `*Error:* ${e.message || e}`
   }
 }
