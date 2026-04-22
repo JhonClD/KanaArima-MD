@@ -391,7 +391,7 @@ const handler = async (m, { conn, usedPrefix, __dirname, isPrems }) => {
         
         text = text.replace(new RegExp(`%(${Object.keys(replace).sort((a, b) => b.length - a.length).join`|`})`, 'g'), (_, name) => '' + replace[name]);
 
-        await conn.sendMessage(m.chat, { text: text.trim(), mentions: [m.sender] }, { quoted: m });
+        await conn.sendMessage(m.chat, { image: global.imagen1, caption: text.trim(), mentions: [m.sender] }, { quoted: m });
     } catch (e) {
         await m.reply(`${tradutor?.error_message} ${e.message}`);
     }
@@ -407,4 +407,5 @@ function clockString(ms) {
     const m = isNaN(ms) ? '--' : Math.floor(ms / 60000) % 60;
     const s = isNaN(ms) ? '--' : Math.floor(ms / 1000) % 60;
     return [h, m, s].map(v => v.toString().padStart(2, 0)).join(':');
-}
+                }
+                
