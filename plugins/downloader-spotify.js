@@ -1,185 +1,263 @@
-/**
- * downloader-spotify.js — Plugin KanaArima-MD / Rikka-Bot (Baileys)
- * Descarga canciones de Spotify por nombre o URL de track.
- * Uso: .spotify <nombre o url>
- */
-
+import fetch from 'node-fetch'
 import axios from 'axios'
 
-// ─── APIs ─────────────────────────────────────────────────────────────────────
-const API_KEY    = 'causa-0e3eacf90ab7be15'
-const SEARCH_URL = 'https://api.vreden.my.id/api/spotifysearch'
-const DL_URL     = 'https://rest.apicausas.xyz/api/v1/descargas/spotify'
-const FALLBACK   = 'https://api.vreden.my.id/api/spotifydl'
+const MAX_FILE_SIZE_MB = 80
+const CACHE_TIME = 1 * 60 * 1000 // 1 minuto
+let spotifyCache = {}
 
-const SPOTIFY_TRACK_RE = /https?:\/\/open\.spotify\.com\/track\/[a-zA-Z0-9]+/i
+function formatNumber(num) {
+    return num.toLocaleString('en-US')
+}
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function sanitizeFilename(name) {
-  return name.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 100)
+async function getSize(url) {
+    try {
+        const res = await axios.head(url)
+        const len = res.headers['content-length']
+        return len ? parseInt(len, 10) : 0
+    } catch {
+        return 0
+    }
+}
+
+function formatSize(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB']
+    let i = 0
+    while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024
+        i++
+    }
+    return `${bytes.toFixed(2)} ${units[i]}`
 }
 
 function formatDuration(ms) {
-  if (!ms || isNaN(ms)) return 'N/A'
-  const m = Math.floor(ms / 60000)
-  const s = Math.floor((ms % 60000) / 1000)
-  return `${m}:${String(s).padStart(2, '0')}`
+    const seconds = Math.floor(ms / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${minutes}:${secs.toString().padStart(2, '0')}`
 }
 
-// ─── Búsqueda ─────────────────────────────────────────────────────────────────
-async function searchTrack(query) {
-  const { data } = await axios.get(SEARCH_URL, {
-    params: { query },
-    timeout: 15_000,
-  })
-  const results = data?.result || data?.data || []
-  if (!results.length) throw new Error('No se encontraron resultados en Spotify.')
-  const t = results[0]
-  return {
-    ...t,
-    title:       t.title      || t.name        || 'Desconocido',
-    artist:      t.artist     || t.artists     || 'Desconocido',
-    album:       t.album      || '',
-    duration:    t.duration   || 'N/A',
-    image:       t.image      || t.thumbnail   || null,
-    release:     t.releaseDate|| t.release_date|| t.released   || '',
-    genre:       Array.isArray(t.genre) ? t.genre.join(' / ') : (t.genre || ''),
-    explicit:    t.explicit   ?? null,
-    popularity:  t.popularity ?? null,
-    url:         t.url        || t.link        || '',
-  }
-}
+async function searchSpotify(query) {
+    try {
+        const api = `https://api.delirius.store/search/spotify?q=${encodeURIComponent(query)}&limit=10`
+        const res = await fetch(api)
+        const data = await res.json()
 
-// ─── Descarga (con fallback) ──────────────────────────────────────────────────
-async function downloadTrack(spotifyUrl) {
-  // Intento 1: apicausas
-  try {
-    const { data } = await axios.get(DL_URL, {
-      params: { apikey: API_KEY, url: spotifyUrl },
-      timeout: 30_000,
-    })
-    if (data?.status && data?.resultado?.url) {
-      const r = data.resultado
-      return {
-        title:    r.titulo    || 'Desconocido',
-        artist:   r.artista   || 'Desconocido',
-        album:    r.album     || '',
-        duration: r.duracion  || 'N/A',
-        image:    r.portada   || null,
-        audioUrl: r.url,
-      }
-    }
-  } catch { /* continúa al fallback */ }
-
-  // Intento 2: vreden fallback
-  const { data } = await axios.get(FALLBACK, {
-    params: { url: spotifyUrl },
-    timeout: 30_000,
-  })
-  if (!data?.result?.download) throw new Error('No se pudo obtener el audio.')
-  const r = data.result
-  return {
-    title:    r.title    || 'Desconocido',
-    artist:   r.artists  || 'Desconocido',
-    album:    r.album    || '',
-    duration: typeof r.duration === 'number' ? formatDuration(r.duration) : (r.duration || 'N/A'),
-    image:    r.image    || null,
-    audioUrl: r.download,
-  }
-}
-
-// ─── Handler ──────────────────────────────────────────────────────────────────
-let handler = async (m, { conn, text, usedPrefix, command }) => {
-  if (!text) return m.reply(
-    `🎵 *Descargador de Spotify*\n\n` +
-    `Uso: _${usedPrefix + command} <nombre o URL>_\n` +
-    `Ejemplo: _${usedPrefix + command} Blinding Lights - The Weeknd_`
-  )
-
-  await conn.sendMessage(m.chat, { react: { text: '🔍', key: m.key } })
-  const wait = await conn.sendMessage(m.chat, { text: '🎵 _Buscando en Spotify..._' }, { quoted: m })
-
-  try {
-    // ── Resolver URL o buscar por texto ──────────────────────────────────────
-    let spotifyUrl = SPOTIFY_TRACK_RE.test(text)
-      ? text.match(SPOTIFY_TRACK_RE)[0]
-      : null
-
-    let meta = null
-
-    if (!spotifyUrl) {
-      meta       = await searchTrack(text)
-      spotifyUrl = meta.url || meta.link
-      if (!spotifyUrl) throw new Error('No se pudo obtener el enlace del track.')
-    }
-
-    // Actualizar mensaje de espera
-    await conn.sendMessage(m.chat, { edit: wait.key, text: '⬇️ _Descargando audio..._' }).catch(() => {})
-
-    // ── Descargar ─────────────────────────────────────────────────────────────
-    const track = await downloadTrack(spotifyUrl)
-
-    // Completar metadata con lo de la búsqueda si falta
-    if (meta) {
-      track.title    = track.title  === 'Desconocido' ? (meta.title  || track.title)  : track.title
-      track.artist   = track.artist === 'Desconocido' ? (meta.artist || track.artist) : track.artist
-      track.image    = track.image  || meta.image     || null
-      track.duration = track.duration !== 'N/A'       ? track.duration : (meta.duration || 'N/A')
-    }
-
-    // ── Borrar espera ─────────────────────────────────────────────────────────
-    await conn.sendMessage(m.chat, { delete: wait.key }).catch(() => {})
-
-    // ── Caption ───────────────────────────────────────────────────────────────
-    const caption =
-      `🎵 *${track.title}*\n` +
-      `👤 *Artista:* ${track.artist}\n` +
-      (track.album    ? `💿 *Álbum:*   ${track.album}\n`    : '') +
-      `⏱️ *Duración:* ${track.duration}\n\n` +
-      `_${global.wm}_`
-
-    // ── Enviar portada ────────────────────────────────────────────────────────
-    if (track.image) {
-      await conn.sendMessage(m.chat, {
-        image: { url: track.image },
-        caption,
-        contextInfo: {
-          externalAdReply: {
-            showAdAttribution: true,
-            title:        track.title.slice(0, 40),
-            body:         track.artist.slice(0, 40),
-            mediaType:    1,
-            thumbnailUrl: track.image,
-            sourceUrl:    spotifyUrl,
-          }
+        if (data && data.data && Array.isArray(data.data)) {
+            return data.data
         }
-      }, { quoted: m })
-    } else {
-      await conn.sendMessage(m.chat, { text: caption }, { quoted: m })
+        return []
+    } catch (e) {
+        console.error('Error en búsqueda de Spotify:', e)
+        return []
     }
-
-    // ── Enviar audio ──────────────────────────────────────────────────────────
-    await conn.sendMessage(m.chat, {
-      audio:    { url: track.audioUrl },
-      fileName: `${sanitizeFilename(track.title)}.mp3`,
-      mimetype: 'audio/mpeg',
-    }, { quoted: m })
-
-    await conn.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
-
-  } catch (e) {
-    await conn.sendMessage(m.chat, { delete: wait.key }).catch(() => {})
-    await conn.sendMessage(m.chat, {
-      text: `❌ *Error al descargar*\n_${e.message}_`
-    }, { quoted: m })
-    await conn.sendMessage(m.chat, { react: { text: '❌', key: m.key } })
-    console.error('[Spotify]', e)
-  }
 }
 
-handler.help    = ['spotify <nombre o url>']
-handler.tags    = ['downloader']
-handler.command = /^(spotify|music)$/i
+async function downloadSpotify(url) {
+    try {
+        const api = `https://api.delirius.store/download/spotifydl?url=${encodeURIComponent(url)}`
+        const res = await fetch(api)
+        const data = await res.json()
 
+        if (data && data.data && data.data.download) {
+            return {
+                link: data.data.download,
+                title: data.data.title || 'Unknown',
+                artist: data.data.author || 'Unknown',
+                thumbnail: data.data.image || null
+            }
+        }
+        return null
+    } catch (e) {
+        console.error('Error al descargar:', e)
+        return null
+    }
+}
+
+var handler = async (m, { text, conn, usedPrefix, command }) => {
+
+    if (!text) {
+        return conn.sendMessage(m.chat, { text: `〩 *Ejemplo de uso:*\n*${usedPrefix + command}* Golden Brown` }, { quoted: m })
+    }
+
+    try {
+        await m.react('⏰')
+
+        const results = await searchSpotify(text)
+
+        if (!results.length) {
+            return conn.sendMessage(m.chat, { text: "No se han encontrado resultados..." }, { quoted: m })
+        }
+
+        let caption = `· ┄ · ⊸ 𔓕 *Spotify  :  Search*\n\n`
+        caption += `\t＃ *Búsqueda* : ${text}\n`
+        caption += `\t＃ *Resultados* : *${results.length}* canciones\n`
+        caption += `\t＃ *Fuente* : Spotify\n\n📍  Responda a este mensaje con el numero correspondiente.\n\n\n`
+
+        for (let i = 0; i < results.length; i++) {
+            const track = results[i]
+            caption += `⧡ *${i + 1}* : ${track.id}\n`
+            caption += `⧡ *Titulo* : ${track.title}\n`
+            caption += `⧡ *Duracion* : ${track.duration || 'N/A'}\n`
+            caption += `⧡ *Enlace* : ${track.url || 'N/A'}\n\n\n`
+        }
+
+        caption += `⏰ *Expira en:* 1 minuto\n\n`
+        caption += `> Buscador de Spotify (created @Farguts)`
+
+        const thumbnail = results[0].image || results[0].thumbnail || null
+
+        let mensajeEnviado;
+
+        if (thumbnail) {
+            const thumbData = (await conn.getFile(thumbnail))?.data
+            mensajeEnviado = await conn.sendMessage(m.chat, { 
+                text: caption, 
+                mentions: [m.sender], 
+                contextInfo: { 
+                    externalAdReply: { 
+                        title: "⧿ Spotify : Search ⧿", 
+                        body: botname, 
+                        thumbnail: thumbData, 
+                        sourceUrl: null, 
+                        mediaType: 1, 
+                        renderLargerThumbnail: false 
+                    }
+                }
+            }, { quoted: m })
+        } else {
+            mensajeEnviado = await conn.sendMessage(m.chat, { text: caption }, { quoted: m })
+        }
+
+        // Guardar en caché con el ID del mensaje
+        const messageId = mensajeEnviado.key.id
+
+        spotifyCache[messageId] = { 
+            results: results, 
+            timestamp: Date.now(),
+            chat: m.chat,
+            activo: true,
+            expirado: false,
+            usuariosDescargados: {} // Rastrear qué usuarios ya descargaron qué canción
+        }
+
+        // Timer de 1 minuto
+        setTimeout(() => {
+            if (spotifyCache[messageId] && spotifyCache[messageId].activo && !spotifyCache[messageId].expirado) {
+                spotifyCache[messageId].expirado = true
+                spotifyCache[messageId].activo = false
+
+                conn.sendMessage(m.chat, { 
+                    text: `⏰  La búsqueda de Spotify ha expirado.\n\n> Usa *${usedPrefix}sp* para buscar de nuevo.` 
+                })
+
+                // Limpiar después de 10 segundos
+                setTimeout(() => {
+                    delete spotifyCache[messageId]
+                }, 10000)
+            }
+        }, CACHE_TIME)
+
+        await m.react('✅')
+    } catch (e) {
+        console.error('Error en comando spotify:', e)
+        await conn.sendMessage(m.chat, { text: `${e.message}` }, { quoted: m })
+    }
+}
+
+handler.before = async (m, { conn }) => {
+    if (!m.text) return false
+    if (m.isBaileys) return false
+    if (!m.quoted) return false
+
+    // Verificar que esté citando un mensaje del bot
+    if (!m.quoted.fromMe) return false
+
+    // Detectar si el mensaje es solo un número del 1 al 10
+    const match = m.text.trim().match(/^(\d{1,2})$/i)
+    if (!match) return false
+
+    const index = parseInt(match[1]) - 1
+    const userId = m.sender
+
+    // Obtener el messageId del mensaje citado
+    const messageId = m.quoted.id
+
+    // Verificar si existe en el caché de Spotify
+    const searchCache = spotifyCache[messageId]
+
+    // Si no existe en el caché de Spotify, ignorar (no es un mensaje de búsqueda de Spotify)
+    if (!searchCache) return false
+
+    // Verificar si ya expiró
+    if (searchCache.expirado || !searchCache.activo) {
+        // Solo mostrar mensaje de expiración si aún no se ha mostrado
+        if (!searchCache.mensajeMostrado) {
+            searchCache.mensajeMostrado = true
+            await conn.sendMessage(m.chat, { 
+                text: `⏰  La búsqueda ha expirado.\n\n> Vuelve a usar el comando de búsqueda.` 
+            }, { quoted: m })
+        }
+        return true
+    }
+
+    // Verificar que el índice sea válido
+    if (!searchCache.results[index]) {
+        await conn.sendMessage(m.chat, { 
+            text: `📍  Número inválido. Elige un número entre 1 y ${searchCache.results.length}.` 
+        }, { quoted: m })
+        return true
+    }
+
+    const track = searchCache.results[index]
+
+    try {
+        await m.react('⏰')
+
+        const downloadData = await downloadSpotify(track.url)
+
+        if (!downloadData) {
+            return conn.sendMessage(m.chat, { text: "No se han encontrado resultados o la API fallo." }, { quoted: m })
+        }
+
+        const size = await getSize(downloadData.link)
+        const mb = size / (1024 * 1024)
+        const sendAsDoc = mb > MAX_FILE_SIZE_MB
+
+        const caption = `${botname}\n> Buscador de Spotify.`
+
+        if (sendAsDoc) {
+            await conn.sendMessage(m.chat, { 
+                document: { url: downloadData.link }, 
+                fileName: `${downloadData.title} - ${downloadData.artist}.mp3`, 
+                mimetype: 'audio/mpeg', 
+                caption 
+            }, { quoted: m })
+        } else {
+            await conn.sendMessage(m.chat, { 
+                audio: { url: downloadData.link }, 
+                fileName: `${downloadData.title} - ${downloadData.artist}.mp3`, 
+                mimetype: 'audio/mpeg', 
+                ptt: false, 
+                caption 
+            }, { quoted: m })
+        }
+
+        await m.react('✅')
+
+        // NO eliminar el caché, solo registrar que este usuario descargó esta canción
+        if (!searchCache.usuariosDescargados[userId]) {
+            searchCache.usuariosDescargados[userId] = []
+        }
+        searchCache.usuariosDescargados[userId].push(index)
+
+    } catch (e) {
+        console.error('Error al descargar:', e)
+        await conn.sendMessage(m.chat, { text: `${e.message}` }, { quoted: m })
+    }
+
+    return true
+}
+
+handler.tags = ['download']
+handler.command = ['spotifys', 'sp', 'spys']
 export default handler
-                                                                          
