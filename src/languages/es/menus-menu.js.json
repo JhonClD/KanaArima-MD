@@ -1,7 +1,7 @@
 {
     "plugins": {
         "menu": {
-            "menu_header": "˖ ࣪ ꉂ🗯˙🫐⃟.꩜\n‹—────୨ৎ────˙ . ꒷🪼 . 𖦹˙—꒷꒦︶꒷꒦︶\n\n◉— *KαɳαAɾιɱα-MD - Bot* —◉\n\n୨ৎ ‧₊˚ 🍓 ⋅ ☆｡𖦹°‧⋆\n\n𖦹˙—˙ . ꒷🪼 . ╰┈➤ *Hola,* @username\n╰┈➤ *Owner:* @author\n╰┈➤ *Número:* wa.me/@owner\n╰┈➤ *Fecha:* @week, @date\n╰┈➤ *⏔ Activo:* @uptime\n╰┈➤ *Usuarios:* @rtotal\n╰┈➤ *Registrados:* @rtotalreg\n\n˖ ݁𖥔 ݁˖  𐙚  ˖ ݁𖥔 ݁˖  ᯓᡣ𐭩  𖤐⭒๋࣭ ⭑",
+            "menu_header": "\n‹—────୨ৎ────˙ . ꒷🪼 . 𖦹˙—꒷꒦︶꒷꒦︶\n\n◉— *KαɳαAɾιɱα-MD - Bot* —◉\n\n୨ৎ ‧₊˚ 🍓 ⋅ ☆｡𖦹°‧⋆\n\n𖦹˙—˙ . ꒷🪼 . ╰┈➤ *Hola,* @username\n╰┈➤ *Owner:* @author\n╰┈➤ *Número:* wa.me/@owner\n╰┈➤ *Fecha:* @week, @date\n╰┈➤ *⏔ Activo:* @uptime\n╰┈➤ *Usuarios:* @rtotal\n╰┈➤ *Registrados:* @rtotalreg\n\n˖ ݁𖥔 ݁˖  𐙚  ˖ ݁𖥔 ݁˖  ᯓᡣ𐭩  𖤐⭒๋࣭ ⭑",
             "user_info": "⁺‧₊˚ ┊𓂃 ࣪˖ *< INFO DEL USUARIO />* ˖ 𓂃┊ ˚₊‧⁺\n꒷꒦︶ ⏝ ︶ ୨୧ ︶ ⏝ ︶꒷꒦︶\n⭑ *Nivel:* @level\n⭑ *Experiencia:* @exp\n⭑ *Rango:* @role\n⭑ *Diamantes:* @limit\n⭑ *MysticCoins:* @money\n⭑ *Tokens:* @joincount\n⭑ *Premium:* @premium\n꒷꒦︶ ⏝ ︶ ୨୧ ︶ ⏝ ︶꒷꒦︶\n",
             "section_header": "✦•┈๑⋅⋯ ⋯⋅๑┈•✦\n⪼ ꒰ *@category* ꒱\n✦•┈๑⋅⋯ ⋯⋅๑┈•✦",
             "command_item": "╰┈➤ □ @cmd @islimit",
