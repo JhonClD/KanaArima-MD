@@ -1,59 +1,72 @@
 /**
- * ╔══════════════════════════════════════════════════════╗
- * ║         owner-botconfig.js  — KanaArima-MD           ║
- * ║  Plugin de configuración del bot (solo propietario)  ║
- * ║  Autor: MINORURAKUEN | GitHub: otakusan212@gmail.com ║
- * ╚══════════════════════════════════════════════════════╝
+ * ˚⊱🪷⊰˚ ⿻ 𓂃 ࣪˖ ִֶָ 𓈈
+ * ╭┈─────────────────── ೄ ྀ ࿐ ˊˎ-
+ * ┊✦ owner-botconfig.js — KanaArima-MD
+ * ┊✦ Configuración del bot · Solo propietario
+ * ┊✦ Dev: MINORURAKUEN ⭑ otakusan212@gmail.com
+ * ╰┈─➤ ❝ Decora tu bot a tu gusto ❞
+ * ˚ • 𖥔 ࣪˖ ⭑ ₊ ⭒ *ೃ༄
  *
- * COMANDOS DISPONIBLES (solo dueño):
- *  .setnombre  <texto>   — Cambia el nombre del bot
- *  .setwm      <texto>   — Cambia el watermark/firma
- *  .setpack    <texto>   — Cambia el packname de stickers
- *  .setauthor  <texto>   — Cambia el autor de stickers
- *  .setstate   <texto>   — Cambia el estado/about del bot en WhatsApp
- *  .setpp                — Cambia la foto de perfil (imagen citada/adjunta)
- *  .setbanner            — Cambia el banner del menú (imagen citada/adjunta)
- *  .setvideo             — Cambia el banner por un VIDEO (video citado/adjunto)
- *  .delbanner            — Elimina el banner personalizado (vuelve al original)
- *  .botconfig            — Muestra la configuración actual del bot
- *  .resetbotconfig       — Restaura la configuración de fábrica
+ * COMANDOS (solo dueño):
+ *  .setnombre  <texto>  — Nombre del bot
+ *  .setwm      <texto>  — Watermark / firma
+ *  .setpack    <texto>  — Packname de stickers
+ *  .setauthor  <texto>  — Autor de stickers
+ *  .setstate   <texto>  — Estado / bio en WhatsApp
+ *  .setpp               — Foto de perfil  (citar imagen)
+ *  .setbanner           — Banner del menú (citar imagen)
+ *  .setvideo            — Banner animado  (citar video)
+ *  .delbanner           — Elimina banner personalizado
+ *  .botconfig           — Muestra config actual
+ *  .resetbotconfig      — Restaura valores de fábrica
  */
 
-import fs from 'fs';
+import fs   from 'fs';
 import path from 'path';
 
-// ─── Ruta del archivo de persistencia ───────────────────────────────────────
+// ˚⊱🪷⊰˚ ─── Rutas ────────────────────────────────────────────────────────
 const CONFIG_FILE = './src/bot-custom-config.json';
 const BANNER_IMG  = './src/assets/images/languages/es/banner_custom.png';
 const BANNER_VID  = './src/assets/images/languages/es/banner_custom.mp4';
 
-// ─── Valores de fábrica (leídos desde globals en tiempo de carga) ─────────
-const DEFAULTS = {
-  wm:         global.wm         || 'Kana Arima - Bot',
-  titulowm:   global.titulowm   || 'Kana Bot',
-  titulowm2:  global.titulowm2  || 'Kana Bot',
-  packname:   global.packname   || 'Kana',
-  author:     global.author     || 'MINORURAKUEN',
-  igfg:       global.igfg       || 'Kana Arima',
-  gt:         global.gt         || 'Kana Arima-MD',
-  kanaarima:  global.kanaarima  || 'Kana Arima-MD',
-  bannerType: 'default',        // 'default' | 'image' | 'video'
+// ˚⊱🪷⊰˚ ─── Decoradores reutilizables ─────────────────────────────────────
+const D = {
+  top:  `˚⊱🪷⊰˚\n⿻\n𓂃 ࣪˖ ִֶָ 𓈈\n╭┈─────── ೄ ྀ ࿐ ˊˎ-`,
+  bot:  `╰━═┅═━────────────────๑\n ִׄ˚ • 𖥔 ࣪˖ ⭑ ₊ ⭒ *ೃ༄`,
+  ok:   `✦ ♥︎ ꕤ`,
+  err:  `(｡>﹏<｡)~`,
+  row:  `┊✦`,
+  sep:  `- ◌ ❛❜ ⋆ ♥︎ ꧕ ⪧ ꕤ*. ⸾ 𖡻`,
+  tip:  `╰┈─➤`,
+  line: `- ◌ ❛❜ ⋆ ♡ ⊹ ★꒷ ᵎᵎ ₊*`,
 };
 
-// ─── Cargar configuración persistida ─────────────────────────────────────────
+// ˚⊱🪷⊰˚ ─── Valores de fábrica ────────────────────────────────────────────
+const DEFAULTS = {
+  wm:        global.wm        || 'Kana Arima - Bot',
+  titulowm:  global.titulowm  || 'Kana Bot',
+  titulowm2: global.titulowm2 || 'Kana Bot',
+  packname:  global.packname  || 'Kana',
+  author:    global.author    || 'MINORURAKUEN',
+  igfg:      global.igfg      || 'Kana Arima',
+  gt:        global.gt        || 'Kana Arima-MD',
+  kanaarima: global.kanaarima || 'Kana Arima-MD',
+  bannerType:'default',
+};
+
+// ˚⊱🪷⊰˚ ─── Cargar config persistida ──────────────────────────────────────
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-      applyConfig(saved);
-      console.log('\x1b[36m[BotConfig]\x1b[0m Configuración personalizada cargada ✔');
+      applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')));
+      console.log('\x1b[35m[˚⊱🪷⊰˚ BotConfig]\x1b[0m Config cargada \u2714');
     }
   } catch (e) {
-    console.error('\x1b[31m[BotConfig]\x1b[0m Error al cargar config:', e.message);
+    console.error('\x1b[31m[BotConfig]\x1b[0m Error cargando config:', e.message);
   }
 }
 
-// ─── Aplicar configuración a los globals ─────────────────────────────────────
+// ˚⊱🪷⊰˚ ─── Aplicar globals ────────────────────────────────────────────────
 function applyConfig(cfg) {
   if (cfg.wm)        global.wm        = cfg.wm;
   if (cfg.titulowm)  global.titulowm  = cfg.titulowm;
@@ -64,9 +77,8 @@ function applyConfig(cfg) {
   if (cfg.gt)        global.gt        = cfg.gt;
   if (cfg.kanaarima) global.kanaarima = cfg.kanaarima;
 
-  // Recargar banner según tipo guardado
   if (cfg.bannerType === 'image' && fs.existsSync(BANNER_IMG)) {
-    global.imagen1 = fs.readFileSync(BANNER_IMG);
+    global.imagen1     = fs.readFileSync(BANNER_IMG);
     global._bannerType = 'image';
   } else if (cfg.bannerType === 'video') {
     global._bannerType = 'video';
@@ -75,13 +87,13 @@ function applyConfig(cfg) {
   }
 }
 
-// ─── Guardar configuración en disco ──────────────────────────────────────────
+// ˚⊱🪷⊰˚ ─── Guardar en disco ──────────────────────────────────────────────
 function saveConfig(data) {
   try {
     fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    console.error('\x1b[31m[BotConfig]\x1b[0m Error guardando config:', e.message);
+    console.error('\x1b[31m[BotConfig]\x1b[0m Error guardando:', e.message);
   }
 }
 
@@ -93,172 +105,298 @@ function currentConfig() {
   } catch { return { ...DEFAULTS }; }
 }
 
-// Cargar al arrancar el bot
+// ˚⊱🪷⊰˚ ─── Asegurar directorios ──────────────────────────────────────────
+try { fs.mkdirSync('./src/tmp', { recursive: true }); } catch (_) {}
+
+// Cargar al iniciar
 loadConfig();
 
-// ─── Handler principal ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//                      HANDLER PRINCIPAL
+// ═══════════════════════════════════════════════════════════════
 const handler = async (m, { conn, args, usedPrefix, command, isOwner, isROwner }) => {
 
-  // ── Permiso: solo el dueño real del bot ──────────────────────────────────
+  // ── Solo el dueño ──────────────────────────────────────────────────────
   if (!isOwner && !isROwner) {
-    return conn.sendMessage(m.chat, {
-      text: `❌ *Solo el dueño del bot puede usar este comando.*`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *Acceso denegado*
+${D.sep}
+${D.row} Solo el *dueño del bot* puede
+${D.row} usar estos comandos ♡
+${D.bot}`
     }, { quoted: m });
   }
 
-  const text  = args.join(' ').trim();
-  const cfg   = currentConfig();
+  const text = args.join(' ').trim();
+  const cfg  = currentConfig();
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setnombre / .setbotname
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setnombre / .setbotname / .setnick
+  // ══════════════════════════════════════════════════════════════
   if (/^(setnombre|setbotname|setnick)$/i.test(command)) {
-    if (!text) return m.reply(`✏️ Uso: *${usedPrefix}setnombre <nombre>*\nEjemplo: ${usedPrefix}setnombre Sakura Bot`);
+    if (!text) return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓷𝓸𝓶𝓫𝓻𝓮 — Uso correcto
+${D.sep}
+${D.row} *Comando:*
+${D.tip} ❝ ${usedPrefix}setnombre <nombre> ❞
+${D.row} *Ejemplo:*
+${D.tip} ❝ ${usedPrefix}setnombre Sakura Bot ❞
+${D.bot}`
+    }, { quoted: m });
 
-    global.wm        = text;
-    global.titulowm  = text;
-    global.titulowm2 = text;
-    global.igfg      = text;
-    global.gt        = text;
-    global.kanaarima = text;
-
-    cfg.wm = cfg.titulowm = cfg.titulowm2 = cfg.igfg = cfg.gt = cfg.kanaarima = text;
+    global.wm = global.titulowm = global.titulowm2 =
+    global.igfg = global.gt = global.kanaarima = text;
+    cfg.wm = cfg.titulowm = cfg.titulowm2 =
+    cfg.igfg = cfg.gt = cfg.kanaarima = text;
     saveConfig(cfg);
+    try { await conn.updateProfileName(text); } catch (_) {}
 
-    // Intentar cambiar el nombre en WhatsApp (puede requerir permisos)
-    try { await conn.updateProfileName(text); } catch (_) { /* Ignorar si el cliente no lo soporta */ }
-
-    return conn.sendMessage(m.chat, {
-      text: `✅ *Nombre del bot actualizado*\n\n🤖 Nuevo nombre: *${text}*`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Nombre actualizado*
+${D.sep}
+${D.row} Nuevo nombre:
+${D.tip} ❝ *${text}* ❞
+${D.bot}`
     }, { quoted: m });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setwm / .setwatermark
-  // ────────────────────────────────────────────────────────────────────────
-  if (/^(setwm|setwatermark|setwatermark)$/i.test(command)) {
-    if (!text) return m.reply(`✏️ Uso: *${usedPrefix}setwm <texto>*\nEjemplo: ${usedPrefix}setwm © Sakura Bot 2025`);
+  // ══════════════════════════════════════════════════════════════
+  //  .setwm / .setwatermark
+  // ══════════════════════════════════════════════════════════════
+  if (/^(setwm|setwatermark)$/i.test(command)) {
+    if (!text) return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝔀𝓶 — Uso correcto
+${D.sep}
+${D.row} *Comando:*
+${D.tip} ❝ ${usedPrefix}setwm <texto> ❞
+${D.row} *Ejemplo:*
+${D.tip} ❝ ${usedPrefix}setwm © Sakura Bot 2025 ❞
+${D.bot}`
+    }, { quoted: m });
 
     global.wm = text;
-    cfg.wm = text;
+    cfg.wm    = text;
     saveConfig(cfg);
 
-    return conn.sendMessage(m.chat, {
-      text: `✅ *Watermark actualizado*\n\n📝 Nuevo WM: *${text}*`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Watermark actualizado*
+${D.sep}
+${D.row} Nuevo wm:
+${D.tip} ❝ _${text}_ ❞
+${D.bot}`
     }, { quoted: m });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setpack
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setpack / .setpackname
+  // ══════════════════════════════════════════════════════════════
   if (/^(setpack|setpackname)$/i.test(command)) {
-    if (!text) return m.reply(`✏️ Uso: *${usedPrefix}setpack <nombre>*\nEjemplo: ${usedPrefix}setpack Sakura Stickers`);
+    if (!text) return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓹𝓪𝓬𝓴 — Uso correcto
+${D.sep}
+${D.row} *Comando:*
+${D.tip} ❝ ${usedPrefix}setpack <nombre> ❞
+${D.row} *Ejemplo:*
+${D.tip} ❝ ${usedPrefix}setpack Sakura Stickers ❞
+${D.bot}`
+    }, { quoted: m });
 
     global.packname = text;
-    cfg.packname = text;
+    cfg.packname    = text;
     saveConfig(cfg);
 
-    return conn.sendMessage(m.chat, {
-      text: `✅ *Pack de stickers actualizado*\n\n📦 Nuevo pack: *${text}*`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Pack de stickers actualizado*
+${D.sep}
+${D.row} Nuevo pack:
+${D.tip} ❝ *${text}* ❞
+${D.bot}`
     }, { quoted: m });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setauthor
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setauthor / .setautor
+  // ══════════════════════════════════════════════════════════════
   if (/^(setauthor|setautor)$/i.test(command)) {
-    if (!text) return m.reply(`✏️ Uso: *${usedPrefix}setauthor <nombre>*\nEjemplo: ${usedPrefix}setauthor MINORURAKUEN`);
+    if (!text) return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓪𝓾𝓽𝓱𝓸𝓻 — Uso correcto
+${D.sep}
+${D.row} *Comando:*
+${D.tip} ❝ ${usedPrefix}setauthor <nombre> ❞
+${D.row} *Ejemplo:*
+${D.tip} ❝ ${usedPrefix}setauthor MINORURAKUEN ❞
+${D.bot}`
+    }, { quoted: m });
 
     global.author = text;
-    cfg.author = text;
+    cfg.author    = text;
     saveConfig(cfg);
 
-    return conn.sendMessage(m.chat, {
-      text: `✅ *Autor de stickers actualizado*\n\n✍️ Nuevo autor: *${text}*`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Autor de stickers actualizado*
+${D.sep}
+${D.row} Nuevo autor:
+${D.tip} ❝ *${text}* ❞
+${D.bot}`
     }, { quoted: m });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setstate / .setstatus / .setbio
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setstate / .setstatus / .setbio / .setabout
+  // ══════════════════════════════════════════════════════════════
   if (/^(setstate|setstatus|setbio|setabout)$/i.test(command)) {
-    if (!text) return m.reply(`✏️ Uso: *${usedPrefix}setstate <texto>*\nEjemplo: ${usedPrefix}setstate 🤖 Bot activo 24/7`);
+    if (!text) return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓼𝓽𝓪𝓽𝓮 — Uso correcto
+${D.sep}
+${D.row} *Comando:*
+${D.tip} ❝ ${usedPrefix}setstate <texto> ❞
+${D.row} *Ejemplo:*
+${D.tip} ❝ ${usedPrefix}setstate Bot activo 24/7 ❞
+${D.bot}`
+    }, { quoted: m });
 
     try {
       await conn.updateProfileStatus(text);
       cfg.state = text;
       saveConfig(cfg);
-      return conn.sendMessage(m.chat, {
-        text: `✅ *Estado/Bio actualizado*\n\n💬 Nuevo estado: _${text}_`
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Estado / Bio actualizado*
+${D.sep}
+${D.row} Nuevo estado:
+${D.tip} ❝ _${text}_ ❞
+${D.bot}`
       }, { quoted: m });
     } catch (e) {
-      return m.reply(`❌ Error al cambiar el estado: ${e.message}`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *Error al cambiar estado*
+${D.sep}
+${D.row} ${e.message}
+${D.bot}`
+      }, { quoted: m });
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setpp — Cambiar foto de perfil del bot
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setpp / .setfoto / .setpfp / .setperfil
+  // ══════════════════════════════════════════════════════════════
   if (/^(setpp|setfoto|setpfp|setperfil)$/i.test(command)) {
     const quoted = m.quoted || m;
-    const mime   = (quoted.mimetype || '').split('/')[0];
 
-    // Verificar que se adjuntó una imagen
     if (!quoted || !/(image)/.test(quoted.mimetype || '')) {
-      return m.reply(`✏️ Uso: *${usedPrefix}setpp*\n📎 Cita o adjunta una *imagen* junto al comando.`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓹𝓹 — Uso correcto
+${D.sep}
+${D.row} Cita o adjunta una *imagen* ♡
+${D.row} junto al comando:
+${D.tip} ❝ ${usedPrefix}setpp ❞
+${D.bot}`
+      }, { quoted: m });
     }
 
     const media = await quoted.download();
-
     try {
       await conn.updateProfilePicture(conn.user.jid, media);
-      return conn.sendMessage(m.chat, {
-        text: `✅ *Foto de perfil del bot actualizada* 🖼️`
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Foto de perfil actualizada*
+${D.sep}
+${D.row} ₍ᵔ๑・ᴥ・๑ᵔ₎ La nueva imagen
+${D.row}   ya esta activa en el bot ~
+${D.bot}`
       }, { quoted: m });
     } catch (e) {
-      return m.reply(`❌ No se pudo cambiar la foto de perfil.\nError: ${e.message}`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *No se pudo cambiar la foto*
+${D.sep}
+${D.row} ${e.message}
+${D.bot}`
+      }, { quoted: m });
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setbanner — Cambiar banner/imagen del menú
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setbanner / .setmenu / .setimg / .setimagen
+  // ══════════════════════════════════════════════════════════════
   if (/^(setbanner|setmenu|setimg|setimagen)$/i.test(command)) {
     const quoted = m.quoted || m;
 
     if (!quoted || !/(image)/.test(quoted.mimetype || '')) {
-      return m.reply(`✏️ Uso: *${usedPrefix}setbanner*\n📎 Cita o adjunta una *imagen* junto al comando.\n_(Reemplazará la imagen del menú principal)_`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓫𝓪𝓷𝓷𝓮𝓻 — Uso correcto
+${D.sep}
+${D.row} Cita o adjunta una *imagen* ♡
+${D.row} junto al comando:
+${D.tip} ❝ ${usedPrefix}setbanner ❞
+${D.row} _Reemplazara el banner del menu_
+${D.bot}`
+      }, { quoted: m });
     }
 
     const media = await quoted.download();
-
     try {
       fs.mkdirSync(path.dirname(BANNER_IMG), { recursive: true });
       fs.writeFileSync(BANNER_IMG, media);
-      global.imagen1      = media;
-      global._bannerType  = 'image';
-      cfg.bannerType      = 'image';
+      global.imagen1     = media;
+      global._bannerType = 'image';
+      cfg.bannerType     = 'image';
       saveConfig(cfg);
 
-      return conn.sendFile(m.chat, media, 'banner.png',
-        `✅ *Banner del menú actualizado* 🖼️\n_El nuevo banner se usará al llamar al menú._`, m);
+      return conn.sendMessage(m.chat, {
+        image: media,
+        caption:
+`${D.top}
+${D.row} ${D.ok} *Banner del menu actualizado*
+${D.sep}
+${D.row} ✰ La nueva imagen se mostrara
+${D.row}   al llamar al menu principal ♡
+${D.bot}`
+      }, { quoted: m });
     } catch (e) {
-      return m.reply(`❌ Error al guardar el banner: ${e.message}`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *Error al guardar el banner*
+${D.sep}
+${D.row} ${e.message}
+${D.bot}`
+      }, { quoted: m });
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .setvideo — Cambiar banner por VIDEO
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .setvideo / .setbannervid / .setvid / .setbannervideo
+  // ══════════════════════════════════════════════════════════════
   if (/^(setvideo|setbannervid|setvid|setbannervideo)$/i.test(command)) {
     const quoted = m.quoted || m;
 
     if (!quoted || !/(video)/.test(quoted.mimetype || '')) {
-      return m.reply(`✏️ Uso: *${usedPrefix}setvideo*\n📎 Cita o adjunta un *video* junto al comando.\n_(Se usará como banner animado del menú)_`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} 𝓢𝓮𝓽𝓿𝓲𝓭𝓮𝓸 — Uso correcto
+${D.sep}
+${D.row} Cita o adjunta un *video* 🎬
+${D.row} junto al comando:
+${D.tip} ❝ ${usedPrefix}setvideo ❞
+${D.row} _Se usara como banner animado_
+${D.bot}`
+      }, { quoted: m });
     }
 
     const media = await quoted.download();
-
     try {
       fs.mkdirSync(path.dirname(BANNER_VID), { recursive: true });
       fs.writeFileSync(BANNER_VID, media);
@@ -267,16 +405,30 @@ const handler = async (m, { conn, args, usedPrefix, command, isOwner, isROwner }
       cfg.bannerType      = 'video';
       saveConfig(cfg);
 
-      return conn.sendFile(m.chat, media, 'banner.mp4',
-        `✅ *Banner de VIDEO actualizado* 🎬\n_El video se usará como banner animado del menú._`, m);
+      return conn.sendMessage(m.chat, {
+        video: media,
+        caption:
+`${D.top}
+${D.row} ${D.ok} *Banner de VIDEO actualizado* 🎬
+${D.sep}
+${D.row} ✰ El video ya esta guardado
+${D.row}   como banner animado del bot ♡
+${D.bot}`
+      }, { quoted: m });
     } catch (e) {
-      return m.reply(`❌ Error al guardar el video: ${e.message}`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *Error al guardar el video*
+${D.sep}
+${D.row} ${e.message}
+${D.bot}`
+      }, { quoted: m });
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .delbanner — Eliminar banner personalizado
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .delbanner / .removebanner / .resetbanner
+  // ══════════════════════════════════════════════════════════════
   if (/^(delbanner|removebanner|resetbanner)$/i.test(command)) {
     try {
       if (fs.existsSync(BANNER_IMG)) fs.unlinkSync(BANNER_IMG);
@@ -285,67 +437,81 @@ const handler = async (m, { conn, args, usedPrefix, command, isOwner, isROwner }
       global.imagen1     = fs.readFileSync('./src/assets/images/languages/es/menu.png');
       global._bannerType = 'default';
       delete global._bannerVideo;
-      cfg.bannerType = 'default';
+      cfg.bannerType     = 'default';
       saveConfig(cfg);
 
-      return conn.sendMessage(m.chat, {
-        text: `✅ *Banner eliminado*\n_Se restauró el banner original del bot._`
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Banner eliminado*
+${D.sep}
+${D.row} ( . >﹏<｡)~ Se restauro
+${D.row}   el banner *original* del bot ♡
+${D.bot}`
       }, { quoted: m });
     } catch (e) {
-      return m.reply(`❌ Error al eliminar el banner: ${e.message}`);
+      return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.err} *Error al eliminar banner*
+${D.sep}
+${D.row} ${e.message}
+${D.bot}`
+      }, { quoted: m });
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .botconfig — Mostrar configuración actual
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .botconfig / .configbot / .botinfo / .infobot
+  // ══════════════════════════════════════════════════════════════
   if (/^(botconfig|configbot|botinfo|infobot)$/i.test(command)) {
     const bannerStatus =
       global._bannerType === 'image' ? '🖼️ Imagen personalizada' :
       global._bannerType === 'video' ? '🎬 Video personalizado'  :
-      '📂 Banner original (default)';
+      '📂 Banner original';
 
-    const info = `
-╔══════════════════════════════╗
-║   ⚙️  CONFIGURACIÓN DEL BOT   ║
-╚══════════════════════════════╝
-
-🤖 *Nombre:*    ${global.wm || '—'}
-📝 *Watermark:* ${global.wm || '—'}
-📦 *Pack:*      ${global.packname || '—'}
-✍️  *Autor:*    ${global.author || '—'}
-🖼️  *Banner:*   ${bannerStatus}
-💬 *Estado:*    ${cfg.state || '_(no establecido)_'}
-
-╔══════════════════════════════╗
-║        📋 COMANDOS           ║
-╚══════════════════════════════╝
-┊✦ ${usedPrefix}setnombre  <nombre>
-┊✦ ${usedPrefix}setwm      <texto>
-┊✦ ${usedPrefix}setpack    <nombre>
-┊✦ ${usedPrefix}setauthor  <nombre>
-┊✦ ${usedPrefix}setstate   <texto>
+    const info =
+`˚⊱🪷⊰˚
+⿻
+𓂃 ࣪˖ ִֶָ 𓈈
+╭┈─────── ೄ ྀ ࿐ ˊˎ-
+┊✦ ❝ 𝓒𝓸𝓷𝓯𝓲𝓰𝓾𝓻𝓪𝓬𝓲𝓸𝓷 𝓭𝓮𝓵 𝓑𝓸𝓽 ❞
+${D.sep}
+┊✦ 🤖 *Nombre:*    ${global.wm || '—'}
+┊✦ 📝 *Watermark:* ${global.wm || '—'}
+┊✦ 📦 *Pack:*      ${global.packname || '—'}
+┊✦ ✍️  *Autor:*     ${global.author || '—'}
+┊✦ 🖼️  *Banner:*    ${bannerStatus}
+┊✦ 💬 *Estado:*    ${cfg.state || '_(sin establecer)_'}
+${D.line}
+╭┈─────── ೄ ྀ ࿐ ˊˎ-
+┊✦ ❝ 𝓒𝓸𝓶𝓪𝓷𝓭𝓸𝓼 ❞
+${D.sep}
+┊✦ ${usedPrefix}setnombre  _<nombre>_
+┊✦ ${usedPrefix}setwm      _<texto>_
+┊✦ ${usedPrefix}setpack    _<nombre>_
+┊✦ ${usedPrefix}setauthor  _<nombre>_
+┊✦ ${usedPrefix}setstate   _<texto>_
 ┊✦ ${usedPrefix}setpp      _(citar imagen)_
 ┊✦ ${usedPrefix}setbanner  _(citar imagen)_
 ┊✦ ${usedPrefix}setvideo   _(citar video)_
 ┊✦ ${usedPrefix}delbanner
 ┊✦ ${usedPrefix}resetbotconfig
-╰━═┅═━──────────────────๑
-`.trim();
+╰━═┅═━────────────────๑
+ ִׄ˚ • 𖥔 ࣪˖ ⭑ ₊ ⭒ *ೃ༄`;
 
     const banner = global.imagen1 || null;
     if (banner) {
-      return conn.sendFile(m.chat, banner, 'config.jpg', info, m);
-    } else {
-      return conn.sendMessage(m.chat, { text: info }, { quoted: m });
+      return conn.sendMessage(m.chat, {
+        image: Buffer.isBuffer(banner) ? banner : Buffer.from(banner),
+        caption: info
+      }, { quoted: m });
     }
+    return conn.sendMessage(m.chat, { text: info }, { quoted: m });
   }
 
-  // ────────────────────────────────────────────────────────────────────────
-  // .resetbotconfig — Restaurar valores de fábrica
-  // ────────────────────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  //  .resetbotconfig / .resetconfig / .resetbot
+  // ══════════════════════════════════════════════════════════════
   if (/^(resetbotconfig|resetconfig|resetbot)$/i.test(command)) {
-    // Borrar archivos de banner personalizados
     try { if (fs.existsSync(BANNER_IMG)) fs.unlinkSync(BANNER_IMG); } catch (_) {}
     try { if (fs.existsSync(BANNER_VID)) fs.unlinkSync(BANNER_VID); } catch (_) {}
 
@@ -353,20 +519,25 @@ const handler = async (m, { conn, args, usedPrefix, command, isOwner, isROwner }
     global.imagen1     = fs.readFileSync('./src/assets/images/languages/es/menu.png');
     global._bannerType = 'default';
     delete global._bannerVideo;
-
     saveConfig({ ...DEFAULTS });
 
-    return conn.sendMessage(m.chat, {
-      text: `✅ *Configuración del bot restaurada*\n_Todos los valores volvieron a los valores de fábrica._`
+    return conn.sendMessage(m.chat, { text:
+`${D.top}
+${D.row} ${D.ok} *Config restaurada*
+${D.sep}
+${D.row} ٩(๛ ˘ ³˘)۶ Todos los valores
+${D.row}   volvieron a los de *fabrica* ♡
+${D.bot}`
     }, { quoted: m });
   }
 };
 
-// ─── Metadatos del plugin ──────────────────────────────────────────────────
+// ˚⊱🪷⊰˚ ─── Metadatos ────────────────────────────────────────────────────
 handler.help    = ['botconfig', 'setnombre', 'setwm', 'setbanner', 'setvideo', 'setpp', 'setstate'];
 handler.tags    = ['owner', 'config'];
 handler.command = /^(setnombre|setbotname|setnick|setwm|setwatermark|setpack|setpackname|setauthor|setautor|setstate|setstatus|setbio|setabout|setpp|setfoto|setpfp|setperfil|setbanner|setmenu|setimg|setimagen|setvideo|setbannervid|setvid|setbannervideo|delbanner|removebanner|resetbanner|botconfig|configbot|botinfo|infobot|resetbotconfig|resetconfig|resetbot)$/i;
-handler.owner   = true;   // Solo el dueño puede usarlo (handler.js lo filtra automáticamente)
+handler.owner   = true;
 handler.rowner  = false;
 
 export default handler;
+    
