@@ -41,7 +41,7 @@ const {
     prepareWAMessageMedia,
     WA_DEFAULT_EPHEMERAL,
     PHONENUMBER_MCC,
-} = (await import("@itsliaaa/baileys")).default;
+} = await import("@itsliaaa/baileys");
 
 export function makeWASocket(connectionOptions, options = {}) {
     /**

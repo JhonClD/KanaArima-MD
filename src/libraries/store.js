@@ -16,7 +16,7 @@
  * Ciphertext error fix and additional improvements by @BrunoSobrino
  * See: https://github.com/BrunoSobrino
  */
-const { BufferJSON, proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('@itsliaaa/baileys')).default;
+const { BufferJSON, proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = await import('@itsliaaa/baileys');
 
 const TIME_TO_DATA_STALE = 5 * 60 * 1000;
 
@@ -168,7 +168,7 @@ export default makeInMemoryStore();
 
 // Version Skid, backup
 /*import {readFileSync, writeFileSync, existsSync} from 'fs';
-const {initAuthCreds, BufferJSON, proto, jidNormalizedUser} = (await import('@itsliaaa/baileys')).default;
+const {initAuthCreds, BufferJSON, proto, jidNormalizedUser} = await import('@itsliaaa/baileys');
 function bind(conn) {
   if (!conn.chats) conn.chats = {};
   function updateNameToDb(contacts) {
