@@ -3,28 +3,28 @@ import { createRequire } from 'module'
 const require = createRequire(import.meta.url)
 const cheerio = require('cheerio')
 
-// ─── Configuración ────────────────────────────────────────────────────────────
-
-const POLL_INTERVAL_MS = 10 * 60 * 1000
+const POLL_INTERVAL_MS   = 10 * 60 * 1000
 const MAX_FEEDS_PER_CHAT = 10
-const MAX_SEEN_GUIDS = 200   // subido para reducir falsas "novedades" tras reinicio
-const REQUEST_TIMEOUT = 15_000
+const MAX_SEEN_GUIDS     = 300
+const REQUEST_TIMEOUT    = 20_000
+const MAX_SEND_PER_TICK  = 3
+const SEND_DELAY_MS      = 1_500
 
-// ─── Helpers de Traducción ────────────────────────────────────────────────────
-
-async function translateText(text) {
-  try {
-    const res = await axios.get(
-      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(text)}`,
-      { timeout: 5000 }
-    )
-    return res.data[0][0][0]
-  } catch {
-    return text
+async function translateText(text, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await axios.get(
+        `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(text)}`,
+        { timeout: 6_000 }
+      )
+      const translated = res.data?.[0]?.[0]?.[0]
+      if (translated) return translated
+    } catch {
+      if (i < retries) await new Promise(r => setTimeout(r, 1_000 * (i + 1)))
+    }
   }
+  return text
 }
-
-// ─── Helpers de RSS ───────────────────────────────────────────────────────────
 
 function initDB() {
   if (!global.db?.data) return
@@ -41,23 +41,20 @@ async function fetchFeed(url) {
   const { data } = await axios.get(url, {
     timeout: REQUEST_TIMEOUT,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*',
-      'Cache-Control': 'no-cache'
+      'User-Agent':    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept':        'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*',
+      'Cache-Control': 'no-cache',
     }
   })
 
-  // ── Detectar prefijos de namespace dinámicamente (inspirado en rss-bridge FeedParser) ──
-  // En lugar de asumir "media:", "content:", etc., detectamos el prefijo real del feed
-  const nsMap = {}  // uri → prefix (ej: 'http://search.yahoo.com/mrss/' → 'media')
+  const nsMap = {}
   for (const [, prefix, uri] of data.matchAll(/xmlns:(\w+)=["']([^"']+)["']/g)) {
     nsMap[uri] = prefix
   }
-  const mediaPrefix   = nsMap['http://search.yahoo.com/mrss/'] || 'media'
+  const mediaPrefix   = nsMap['http://search.yahoo.com/mrss/']            || 'media'
   const contentPrefix = nsMap['http://purl.org/rss/1.0/modules/content/'] || 'content'
-  const dcPrefix      = nsMap['http://purl.org/dc/elements/1.1/'] || 'dc'
+  const dcPrefix      = nsMap['http://purl.org/dc/elements/1.1/']         || 'dc'
 
-  // Normalizar CDATA y & sueltos
   const xml = data
     .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/gi, '&amp;')
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, c) => c.trim())
@@ -65,88 +62,67 @@ async function fetchFeed(url) {
   const $ = cheerio.load(xml, { xmlMode: true })
   const txt = el => $(el).text().replace(/<[^>]+>/g, '').trim()
 
-  // ── Link: texto hijo o href (rss-bridge usa (string)$feedItem->link) ─────────
+  const channelTitle = txt($('channel > title').first()) ||
+                       txt($('feed > title').first())    || ''
+
   const extractLink = el => {
     const byText = $(el).find('link').first().text().trim()
     if (byText && /^https?:\/\//.test(byText)) return byText
     const byHref = $(el).find('link[rel="alternate"]').attr('href') ||
                    $(el).find('link').first().attr('href')
     if (byHref && /^https?:\/\//.test(byHref)) return byHref
-    const raw = $.html(el)
-    const m = raw.match(/<link[^>]*?>([^<]+)<\/link>/)
+    const m = $.html(el).match(/<link[^>]*?>([^<]+)<\/link>/)
     return (m && /^https?:\/\//.test(m[1].trim())) ? m[1].trim() : ''
   }
 
-  // ── Media: detecta video e imagen en el XML crudo del item ───────────────────
-  // Usa los prefijos reales detectados del feed (no hardcoded)
   const extractMedia = (el, desc = '') => {
     const raw = $.html(el)
     let img = null, video = null
 
-    // 1. <enclosure> — rss-bridge: $feedItem->enclosure['url'] + type
-    const encVid = raw.match(new RegExp('<enclosure[^>]+type=["\']video[^"\']*["\'][^>]+url=["\']([^"\']+)["\']', 'i'))
-                || raw.match(new RegExp('<enclosure[^>]+url=["\']([^"\']+)["\'][^>]+type=["\']video[^"\']*["\']', 'i'))
+    const encVid = raw.match(/<enclosure[^>]+type=["']video[^"']*["'][^>]+url=["']([^"']+)["']/i)
+                || raw.match(/<enclosure[^>]+url=["']([^"']+)["'][^>]+type=["']video[^"']*["']/i)
     if (encVid) video = encVid[1]
-
-    const encImg = raw.match(new RegExp('<enclosure[^>]+type=["\']image[^"\']*["\'][^>]+url=["\']([^"\']+)["\']', 'i'))
-                || raw.match(new RegExp('<enclosure[^>]+url=["\']([^"\']+)["\'][^>]+type=["\']image[^"\']*["\']', 'i'))
+    const encImg = raw.match(/<enclosure[^>]+type=["']image[^"']*["'][^>]+url=["']([^"']+)["']/i)
+                || raw.match(/<enclosure[^>]+url=["']([^"']+)["'][^>]+type=["']image[^"']*["']/i)
     if (encImg) img = encImg[1]
 
-    // 2. media:thumbnail (prefijo dinámico) — más fiable para Crunchyroll/ANN
     if (!img) {
-      const thRe = new RegExp(`<${mediaPrefix}:thumbnail[^>]+url=["']([^"']+)["']`, 'i')
-      const thMatch = raw.match(thRe)
-      if (thMatch) img = thMatch[1]
+      const m = raw.match(new RegExp(`<${mediaPrefix}:thumbnail[^>]+url=["']([^"']+)["']`, 'i'))
+      if (m) img = m[1]
     }
 
-    // 3. media:content (prefijo dinámico) — video o imagen
-    if (!video || !img) {
-      const mcVidRe = new RegExp(`<${mediaPrefix}:content[^>]+medium=["']video["'][^>]+url=["']([^"']+)["']`, 'i')
-      const mcVid = raw.match(mcVidRe)
-        || raw.match(new RegExp(`<${mediaPrefix}:content[^>]+url=["']([^"']+\\.(?:mp4|webm|mov))[^"']*["']`, 'i'))
-      if (mcVid && !video) video = mcVid[1]
-
-      const mcImgRe = new RegExp(`<${mediaPrefix}:content[^>]+url=["']([^"']+\\.(?:jpe?g|png|gif|webp))[^"']*["']`, 'i')
-      const mcImg = raw.match(mcImgRe)
-        || raw.match(new RegExp(`<${mediaPrefix}:content[^>]+medium=["']image["'][^>]+url=["']([^"']+)["']`, 'i'))
-      if (mcImg && !img) img = mcImg[1]
+    if (!video) {
+      const m = raw.match(new RegExp(`<${mediaPrefix}:content[^>]+medium=["']video["'][^>]+url=["']([^"']+)["']`, 'i'))
+             || raw.match(new RegExp(`<${mediaPrefix}:content[^>]+url=["']([^"']+\\.(?:mp4|webm|mov))[^"']*["']`, 'i'))
+      if (m) video = m[1]
     }
-
-    // 4. content:encoded (prefijo dinámico) — Crunchyroll pone la imagen aquí
     if (!img) {
-      const encRe = new RegExp(`<${contentPrefix}:encoded[^>]*>([\\s\\S]*?)<\\/${contentPrefix}:encoded>`, 'i')
-      const encoded = raw.match(encRe)
-      if (encoded) img = extractFirstImgSrc(encoded[1])
+      const m = raw.match(new RegExp(`<${mediaPrefix}:content[^>]+url=["']([^"']+\\.(?:jpe?g|png|gif|webp))[^"']*["']`, 'i'))
+             || raw.match(new RegExp(`<${mediaPrefix}:content[^>]+medium=["']image["'][^>]+url=["']([^"']+)["']`, 'i'))
+      if (m) img = m[1]
     }
 
-    // 5. <img src> en description como último recurso
+    if (!img) {
+      const m = raw.match(new RegExp(`<${contentPrefix}:encoded[^>]*>([\\s\\S]*?)<\\/${contentPrefix}:encoded>`, 'i'))
+      if (m) img = extractFirstImgSrc(m[1])
+    }
+
     if (!img) img = extractFirstImgSrc(desc)
 
     return { img, video }
   }
 
-  // ── GUID con soporte isPermaLink (rss-bridge: isPermaLink fallback) ──────────
-  const extractGuid = (el, link) => {
-    const guidEl = $(el).find('guid').first()
-    const guidText = txt(guidEl)
-    if (guidText) return guidText
-    // Si no hay guid, usar link (rss-bridge fallback)
-    return link || ''
-  }
-
-  // ── pubDate con fallback dc:date (rss-bridge: $feedItem->pubDate ?? $dc->date) ─
+  const extractGuid = (el, link) => txt($(el).find('guid').first()) || link || ''
   const extractDate = el => {
-    const raw = $.html(el)
+    const raw     = $.html(el)
     const pubDate = txt($(el).find('pubDate').first())
     if (pubDate) return pubDate
-    const dcRe = new RegExp(`<${dcPrefix}:date[^>]*>([^<]+)<\/${dcPrefix}:date>`, 'i')
-    const dcMatch = raw.match(dcRe)
-    return dcMatch ? dcMatch[1].trim() : ''
+    const m = raw.match(new RegExp(`<${dcPrefix}:date[^>]*>([^<]+)<\/${dcPrefix}:date>`, 'i'))
+    return m ? m[1].trim() : ''
   }
 
   const items = []
 
-  // ── RSS 2.0 / RDF ─────────────────────────────────────────────────────────────
   $('item').each((_, el) => {
     const title   = txt($(el).find('title').first())
     const link    = extractLink(el)
@@ -157,7 +133,6 @@ async function fetchFeed(url) {
     if (title && guid) items.push({ title, link, guid, pubDate, img, video })
   })
 
-  // ── Atom ──────────────────────────────────────────────────────────────────────
   if (!items.length) {
     $('entry').each((_, el) => {
       const title   = txt($(el).find('title').first())
@@ -171,9 +146,8 @@ async function fetchFeed(url) {
     })
   }
 
-  return items
+  return { items, channelTitle }
 }
-
 
 function extractFirstImgSrc(html = '') {
   const m = html.match(/<img[^>]+src=["']([^"'>]+)["']/i)
@@ -186,122 +160,139 @@ function formatDate(pubDate) {
   return isNaN(d) ? '' : d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function capitalize(s) {
+function capitalize(s = '') {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-// ─── Poller Automático ────────────────────────────────────────────────────────
+function buildMessage(feed, item, translatedTitle) {
+  const dateStr = formatDate(item.pubDate)
+  return [
+    `📰 *${capitalize(feed.label || 'RSS')}*`,
+    `━━━━━━━━━━━━━━━━`,
+    `🎌 *${translatedTitle}*`,
+    dateStr ? `🕐 ${dateStr}` : null,
+    ``,
+    `🔗 ${item.link}`
+  ].filter(l => l !== null).join('\n')
+}
 
-let _pollerStarted = false
+async function sendItem(conn, chatId, feed, item) {
+  const translatedTitle = await translateText(item.title)
+  const text = buildMessage(feed, item, translatedTitle)
+  if (item.video) {
+    await conn.sendMessage(chatId, { video: { url: item.video }, caption: text, mimetype: 'video/mp4' })
+  } else if (item.img) {
+    await conn.sendMessage(chatId, { image: { url: item.img }, caption: text })
+  } else {
+    await conn.sendMessage(chatId, { text })
+  }
+}
 
-async function checkAllFeeds(conn) {
+if (!global._rssPoller) global._rssPoller = { started: false, timer: null, initTimer: null }
+
+async function checkAllFeeds() {
+  const conn = global.conn
+  if (!conn) return
   if (!global.db?.data?.rss) return
 
-  // ── Paso 1: agrupar todas las suscripciones por URL ──────────────────────────
-  // urlMap[url] = [ { chatId, feed }, ... ]
   const urlMap = {}
   for (const [chatId, feeds] of Object.entries(global.db.data.rss)) {
-    if (!feeds?.length) continue
+    if (!Array.isArray(feeds) || !feeds.length) continue
     for (const feed of feeds) {
+      if (!feed?.url || feed.paused) continue
       if (!urlMap[feed.url]) urlMap[feed.url] = []
       urlMap[feed.url].push({ chatId, feed })
     }
   }
 
-  // ── Paso 2: fetch una sola vez por URL y distribuir a todos los grupos ────────
+  let dbDirty = false
+
   for (const [url, subscribers] of Object.entries(urlMap)) {
     let items
     try {
-      items = await fetchFeed(url)
+      ;({ items } = await fetchFeed(url))
       if (!items.length) continue
     } catch (e) {
       if (e.code !== 'ECONNRESET') console.error(`[RSS Error] ${url}:`, e.message)
       continue
     }
 
-    // Pre-traducir títulos de items nuevos una sola vez (se reutiliza por grupo)
-    // Se calcula por suscriptor porque cada uno tiene su propio seenGuids
     for (const { chatId, feed } of subscribers) {
-      // Primera vez: inicializar sin enviar
-      if (!feed.seenGuids || !feed.seenGuids.length) {
+      if (!Array.isArray(feed.seenGuids) || !feed.seenGuids.length) {
         feed.seenGuids = items.map(i => i.guid).slice(0, MAX_SEEN_GUIDS)
+        dbDirty = true
         continue
       }
 
       const newItems = items.filter(i => !feed.seenGuids.includes(i.guid))
       if (!newItems.length) continue
 
-      // Traducir una sola vez para este lote (mismo feed, mismo contenido)
-      const toSend = newItems.reverse().slice(0, 3)
+      const toSend = newItems.reverse().slice(0, MAX_SEND_PER_TICK)
+
       for (const item of toSend) {
         try {
-          const translatedTitle = await translateText(item.title)
-          const dateStr = formatDate(item.pubDate)
-          const text = `📰 *${feed.label || 'RSS'}*\n━━━━━━━━━━━━━━━━\n🎌 *${translatedTitle}*\n${dateStr ? '🕐 ' + dateStr + '\n' : ''}\n🔗 ${item.link}`
-
-          if (item.video) {
-            await conn.sendMessage(chatId, { video: { url: item.video }, caption: text, mimetype: 'video/mp4' })
-          } else if (item.img) {
-            await conn.sendMessage(chatId, { image: { url: item.img }, caption: text })
-          } else {
-            await conn.sendMessage(chatId, { text })
-          }
-          await new Promise(r => setTimeout(r, 1500))
+          await sendItem(conn, chatId, feed, item)
+          await new Promise(r => setTimeout(r, SEND_DELAY_MS))
         } catch (e) {
           console.error(`[RSS Send] ${chatId}:`, e.message)
         }
       }
 
-      // Marcar todos los nuevos como vistos (no solo los enviados)
       feed.seenGuids = [
         ...newItems.map(i => i.guid),
         ...feed.seenGuids
       ].slice(0, MAX_SEEN_GUIDS)
+      dbDirty = true
     }
   }
 
-  try { await global.db.write() } catch (e) { console.error('[RSS] db.write error:', e.message) }
+  if (dbDirty) {
+    try { await global.db.write() } catch (e) { console.error('[RSS] db.write error:', e.message) }
+  }
 }
 
-function startPoller(conn) {
-  if (_pollerStarted) return
-  _pollerStarted = true
+function startPoller() {
+  if (global._rssPoller.initTimer) { clearTimeout(global._rssPoller.initTimer);  global._rssPoller.initTimer = null }
+  if (global._rssPoller.timer)     { clearInterval(global._rssPoller.timer);      global._rssPoller.timer = null }
+  global._rssPoller.started = false
+
+  if (global._rssPoller.started) return
+  global._rssPoller.started = true
   console.log('[RSS] Poller activo ✓')
 
-  // Primer check a los 30 s del arranque (no esperar 10 min)
-  setTimeout(() => checkAllFeeds(conn).catch(e => console.error('[RSS Poller init]', e.message)), 30_000)
+  global._rssPoller.initTimer = setTimeout(
+    () => checkAllFeeds().catch(e => console.error('[RSS Poller init]', e.message)),
+    30_000
+  )
 
-  // Check periódico: el .catch() evita que el setInterval muera por un error
-  setInterval(
-    () => checkAllFeeds(conn).catch(e => console.error('[RSS Poller tick]', e.message)),
+  global._rssPoller.timer = setInterval(
+    () => checkAllFeeds().catch(e => console.error('[RSS Poller tick]', e.message)),
     POLL_INTERVAL_MS
   )
 }
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
-
 let handler = async (m, { conn, text, usedPrefix, command, isOwner, isAdmin, isROwner }) => {
-  const chatId = m.chat
-  const feeds  = feedsOf(chatId)
+  const chatId    = m.chat
+  const feeds     = feedsOf(chatId)
   const canManage = isOwner || isAdmin || isROwner
 
-  // .rsslist
   if (/list$/i.test(command)) {
     if (!feeds.length) return m.reply(`❌ No hay feeds activos.\nUsa *${usedPrefix}rssadd <url>*`)
     let msg = `📋 *Feeds Activos (${feeds.length}/${MAX_FEEDS_PER_CHAT})*\n━━━━━━━━━━━━━━━━\n`
-    feeds.forEach((f, i) => msg += `*${i + 1}.* ${capitalize(f.label)}\n   🔗 ${f.url}\n`)
+    feeds.forEach((f, i) => {
+      msg += `*${i + 1}.* ${capitalize(f.label)}${f.paused ? ' ⏸️' : ''}\n   🔗 ${f.url}\n`
+    })
     return m.reply(msg)
   }
 
-  // .rssrecientes
   if (/recientes$/i.test(command)) {
     if (!feeds.length) return m.reply(`❌ No hay feeds registrados.`)
     const idx  = parseInt(text) - 1
-    const feed = feeds[idx] || feeds[0]
-    m.reply(`⏳ Cargando noticias de *${feed.label}*...`)
+    const feed = (!isNaN(idx) && feeds[idx]) ? feeds[idx] : feeds[0]
+    await m.reply(`⏳ Cargando noticias de *${feed.label}*...`)
     try {
-      const items = await fetchFeed(feed.url)
-      const top   = items.slice(0, 5)
+      const { items } = await fetchFeed(feed.url)
+      const top = items.slice(0, 5)
       let res = `📰 *${capitalize(feed.label)}*\n━━━━━━━━━━━━━━━━\n`
       for (const [i, it] of top.entries()) {
         const translated = await translateText(it.title)
@@ -313,65 +304,57 @@ let handler = async (m, { conn, text, usedPrefix, command, isOwner, isAdmin, isR
     }
   }
 
-  // .rssadd
   if (/add$/i.test(command)) {
     if (!canManage) return m.reply('⛔ Solo administradores.')
     if (!text)      return m.reply(`Ejemplo: *${usedPrefix}rssadd <url>*`)
-
     const url = text.trim()
     if (!/^https?:\/\//.test(url))          return m.reply('❌ URL inválida.')
-    if (feeds.some(f => f.url === url))      return m.reply('⚠️ Ya está en la lista.')
-    if (feeds.length >= MAX_FEEDS_PER_CHAT)  return m.reply('⚠️ Límite alcanzado.')
-
+    if (feeds.some(f => f.url === url))     return m.reply('⚠️ Ya está en la lista.')
+    if (feeds.length >= MAX_FEEDS_PER_CHAT) return m.reply('⚠️ Límite alcanzado.')
     await m.reply('⏳ Verificando URL...')
     try {
-      const items = await fetchFeed(url)
-      if (!items.length) return m.reply('❌ No se encontraron noticias.')
-
-      const label = new URL(url).hostname
-      // seenGuids inicializado con los items actuales → no notifica noticias viejas
-      feeds.push({ url, label, seenGuids: items.map(i => i.guid).slice(0, MAX_SEEN_GUIDS) })
+      const { items, channelTitle } = await fetchFeed(url)
+      if (!items.length) return m.reply('❌ No se encontraron noticias en ese feed.')
+      const label = channelTitle || new URL(url).hostname
+      feeds.push({ url, label, seenGuids: items.map(i => i.guid).slice(0, MAX_SEEN_GUIDS), paused: false })
       await global.db.write()
-      return m.reply(`✅ Agregado: *${capitalize(label)}* (traducción automática activada)`)
+      return m.reply(`✅ Feed agregado: *${capitalize(label)}*\n📌 ${items.length} items encontrados, notificará solo los nuevos.`)
     } catch (e) {
       return m.reply(`❌ No se pudo conectar: ${e.message}`)
     }
   }
 
-  // .rssdel
   if (/del$/i.test(command)) {
     if (!canManage) return m.reply('⛔ Solo administradores.')
     const n = parseInt(text) - 1
-    if (isNaN(n) || !feeds[n]) return m.reply('❌ Número inválido.')
+    if (isNaN(n) || !feeds[n]) return m.reply('❌ Número inválido. Usa *.rsslist* para ver los feeds.')
     const [removed] = feeds.splice(n, 1)
     await global.db.write()
     return m.reply(`🗑️ Feed *${removed.label}* eliminado.`)
   }
 
-  // .rsscheck        → check normal de novedades
-  // .rsscheck 1      → fuerza envío del primer item de cada feed (sin tocar seenGuids)
-  if (/check$/i.test(command)) {
-    const force = text?.trim() === '1'
+  if (/pause$/i.test(command) || /resume$/i.test(command)) {
+    if (!canManage) return m.reply('⛔ Solo administradores.')
+    const isPause = /pause$/i.test(command)
+    const n = parseInt(text) - 1
+    if (isNaN(n) || !feeds[n]) return m.reply('❌ Número inválido.')
+    feeds[n].paused = isPause
+    await global.db.write()
+    return m.reply(`${isPause ? '⏸️ Pausado' : '▶️ Reanudado'}: *${feeds[n].label}*`)
+  }
 
-    if (force) {
+  if (/check$/i.test(command)) {
+    const mode = text?.trim()
+
+    if (mode === '1') {
       if (!feeds.length) return m.reply('❌ No hay feeds en este grupo.')
-      await m.reply(`📡 Enviando el último item de *${feeds.length}* feed(s)...`)
+      await m.reply(`📡 Enviando último item de *${feeds.length}* feed(s)...`)
       for (const feed of feeds) {
         try {
-          const items = await fetchFeed(feed.url)
+          const { items } = await fetchFeed(feed.url)
           if (!items.length) continue
-          const item = items[0]
-          const translatedTitle = await translateText(item.title)
-          const dateStr = formatDate(item.pubDate)
-          const text2 = `📰 *${feed.label || 'RSS'}*\n━━━━━━━━━━━━━━━━\n🎌 *${translatedTitle}*\n${dateStr ? '🕐 ' + dateStr + '\n' : ''}\n🔗 ${item.link}`
-          if (item.video) {
-            await conn.sendMessage(chatId, { video: { url: item.video }, caption: text2, mimetype: 'video/mp4' })
-          } else if (item.img) {
-            await conn.sendMessage(chatId, { image: { url: item.img }, caption: text2 })
-          } else {
-            await conn.sendMessage(chatId, { text: text2 })
-          }
-          await new Promise(r => setTimeout(r, 1500))
+          await sendItem(conn, chatId, feed, items[0])
+          await new Promise(r => setTimeout(r, SEND_DELAY_MS))
         } catch (e) {
           await conn.sendMessage(chatId, { text: `⚠️ Error en *${feed.label}*: ${e.message}` })
         }
@@ -379,68 +362,48 @@ let handler = async (m, { conn, text, usedPrefix, command, isOwner, isAdmin, isR
       return m.reply('✅ Listo.')
     }
 
-    if (text?.trim() === '2') {
+    if (mode === '2') {
+      if (!canManage && !isOwner) return m.reply('⛔ Solo dueño.')
       if (!global.db?.data?.rss) return m.reply('❌ Sin datos RSS.')
-      await m.reply('📡 Enviando el último item a todos los grupos suscritos...')
-
-      // Agrupar por URL (igual que checkAllFeeds)
+      await m.reply('📡 Enviando último item a todos los grupos suscritos...')
       const urlMap = {}
       for (const [cid, cfeeds] of Object.entries(global.db.data.rss)) {
-        if (!cfeeds?.length) continue
+        if (!Array.isArray(cfeeds)) continue
         for (const feed of cfeeds) {
           if (!urlMap[feed.url]) urlMap[feed.url] = []
           urlMap[feed.url].push({ chatId: cid, feed })
         }
       }
-
       for (const [url, subscribers] of Object.entries(urlMap)) {
         let items
         try {
-          items = await fetchFeed(url)
+          ;({ items } = await fetchFeed(url))
           if (!items.length) continue
-        } catch (e) {
-          console.error(`[rsscheck 2] ${url}:`, e.message)
-          continue
-        }
-
-        const item = items[0]
+        } catch { continue }
         for (const { chatId: cid, feed } of subscribers) {
           try {
-            const translatedTitle = await translateText(item.title)
-            const dateStr = formatDate(item.pubDate)
-            const text2 = `📰 *${feed.label || 'RSS'}*\n━━━━━━━━━━━━━━━━\n🎌 *${translatedTitle}*\n${dateStr ? '🕐 ' + dateStr + '\n' : ''}\n🔗 ${item.link}`
-            if (item.video) {
-              await conn.sendMessage(cid, { video: { url: item.video }, caption: text2, mimetype: 'video/mp4' })
-            } else if (item.img) {
-              await conn.sendMessage(cid, { image: { url: item.img }, caption: text2 })
-            } else {
-              await conn.sendMessage(cid, { text: text2 })
-            }
-            await new Promise(r => setTimeout(r, 1500))
-          } catch (e) {
-            console.error(`[rsscheck 2 send] ${cid}:`, e.message)
-          }
+            await sendItem(conn, cid, feed, items[0])
+            await new Promise(r => setTimeout(r, SEND_DELAY_MS))
+          } catch (e) { console.error(`[rsscheck 2 send] ${cid}:`, e.message) }
         }
       }
       return m.reply('✅ Listo.')
     }
 
-    // check normal
     await m.reply('🔄 Buscando actualizaciones...')
-    await checkAllFeeds(conn)
+    await checkAllFeeds()
     return m.reply('✅ Listo. Solo se enviaron items no vistos anteriormente.')
   }
 }
 
-// Inicia el poller en cada mensaje (solo arranca una vez por _pollerStarted)
-handler.all = async function (m, { conn } = {}) {
-  const c = conn || global.conn
-  if (!_pollerStarted && c) startPoller(c)
+handler.all = async function (_m) {
+  const c = this || global.conn
+  if (c && !global._rssPoller.started) startPoller()
 }
 
-handler.command = /^rss(add|del|list|recientes|check)$/i
+handler.command = /^rss(add|del|list|recientes|check|pause|resume)$/i
 handler.tags    = ['tools']
-handler.help    = ['rssadd <url>', 'rssdel <número>', 'rsslist', 'rssrecientes', 'rsscheck']
+handler.help    = ['rssadd <url>', 'rssdel <número>', 'rsslist', 'rssrecientes [n]', 'rsscheck', 'rsspause <n>', 'rssresume <n>']
 
 export default handler
-      
+    
