@@ -1,4 +1,4 @@
-import { generateWAMessageFromContent } from "baileys";
+import { generateWAMessageFromContent } from "@itsliaaa/baileys";
 import { smsg } from './src/libraries/simple.js';
 import { format } from 'util';
 import { fileURLToPath } from 'url';
@@ -11,9 +11,9 @@ import ws from 'ws';
 let mconn;
 
 /**
- * @type {import("baileys")}
+ * @type {import("@itsliaaa/baileys")}
  */
-const { proto } = (await import("baileys")).default;
+const { proto } = (await import("@itsliaaa/baileys")).default;
 const isNumber = (x) => typeof x === 'number' && !isNaN(x);
 const delay = (ms) => isNumber(ms) && new Promise((resolve) => setTimeout(function () {
   clearTimeout(this);
@@ -22,7 +22,7 @@ const delay = (ms) => isNumber(ms) && new Promise((resolve) => setTimeout(functi
 
 /**
  * Handle messages upsert
- * @param {import("baileys").BaileysEventMap<unknown>['messages.upsert']} groupsUpdate
+ * @param {import("@itsliaaa/baileys").BaileysEventMap<unknown>['messages.upsert']} groupsUpdate
  */
 export async function handler(chatUpdate) {
   this.msgqueque = this.msgqueque || [];
@@ -1119,7 +1119,7 @@ ${tradutor.texto1[1]} ${messageNumber}/3
 
 /**
  * Handle groups participants update
- * @param {import("baileys").BaileysEventMap<unknown>['group-participants.update']} groupsUpdate
+ * @param {import("@itsliaaa/baileys").BaileysEventMap<unknown>['group-participants.update']} groupsUpdate
  */
 export async function participantsUpdate({ id, participants: _rawParticipants, action }) {
   const idioma = global?.db?.data?.chats[id]?.language || global.defaultLenguaje;
@@ -1206,7 +1206,7 @@ export async function participantsUpdate({ id, participants: _rawParticipants, a
 
 /**
  * Handle groups update
- * @param {import("baileys").BaileysEventMap<unknown>['groups.update']} groupsUpdate
+ * @param {import("@itsliaaa/baileys").BaileysEventMap<unknown>['groups.update']} groupsUpdate
  */
 
 export async function groupsUpdate(groupsUpdate) {

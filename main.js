@@ -21,7 +21,7 @@ import { Low, JSONFile } from 'lowdb';
 import store from './src/libraries/store.js';
 import LidResolver from './src/libraries/LidResolver.js';
 
-const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidNormalizedUser, PHONENUMBER_MCC } = await import("baileys");
+const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidNormalizedUser, PHONENUMBER_MCC } = await import("@itsliaaa/baileys");
 import readline from 'readline';
 import NodeCache from 'node-cache';
 const { chain } = lodash;
