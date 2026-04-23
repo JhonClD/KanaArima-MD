@@ -29,8 +29,8 @@ const handler = async (m, { conn }) => {
       `ִֶָ𓂃 ࣪˖ ִֶָ  *FILE UPLOADED*  ִֶָ𓂃 ࣪˖ ִֶָ\n\n` +
       `⭑ ₊ ⭒  *ID*    ꩜  \`${fileId}\`\n` +
       `⭑ ₊ ⭒  *NAME*  ꩜  \`${fileName}\`\n` +
-      `⭑ ₊ ⭒  *PESO*  ꩜  \`${pesoTxt}\`\n` +
-      `⭑ ₊ ⭒  *MIME*  ꩜  \`${mime}\`\n\n` +
+      `⭑ ₊ ⭒  *SIZE*  ꩜  \`${pesoTxt}\`\n` +
+      `⭑ ₊ ⭒  *TYPE*  ꩜  \`${mime}\`\n\n` +
       `˗ˏˋ ꒰ ✉︎ ꒱ ˎˊ˗  *URL*\n` +
       `${link}\n\n` +
       `✧˚ ༘ ⋆｡˚  𖥔 ࣪˖`
