@@ -720,7 +720,14 @@ export async function handler(chatUpdate) {
       const cached = this.resolveLid.lidCache.get(m.sender);
       if (cached && !cached.endsWith?.('@lid')) resolvedSender = cached;
     }
-    const user = (m.isGroup ? participants.find((u) => conn.decodeJid(u.id || u.jid) === resolvedSender) : {}) || {}; // User Data
+    const user = (m.isGroup ? (
+      // Buscar por JID resuelto
+      participants.find((u) => conn.decodeJid(u.id || u.jid) === resolvedSender) ||
+      // Fallback: buscar por campo LID del participante (por si m.sender sigue siendo @lid)
+      participants.find((u) => u.lid && (conn.decodeJid(u.lid) === m.sender || u.lid === m.sender)) ||
+      // Fallback final: sender sin resolver
+      participants.find((u) => conn.decodeJid(u.id || u.jid) === m.sender)
+    ) : {}) || {}; // User Data
     const bot = (m.isGroup ? participants.find((u) => conn.decodeJid(u.id || u.jid) == this.user.jid) : {}) || {}; // Your Data
     const isRAdmin = user?.admin == 'superadmin' || false;
     const isAdmin = isRAdmin || user?.admin == 'admin' || isROwner || false; // Is User Admin? (owner siempre pasa)
