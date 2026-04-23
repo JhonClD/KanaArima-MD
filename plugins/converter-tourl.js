@@ -1,21 +1,48 @@
-import uploadImage from '../src/libraries/uploadImage.js';
+import uploadImage from '../src/libraries/uploadImage.js'
 
-const handler = async (m) => {
-  const datas = global;
-  const idioma = datas.db.data.users[m.sender].language || global.defaultLenguaje;
-  const _translate = JSON.parse(fs.readFileSync(`./src/languages/${idioma}.json`));
-  const tradutor = _translate.plugins.convertidor_tourl;
-
-  const q = m.quoted ? m.quoted : m
+const handler = async (m, { conn }) => {
+  const q    = m.quoted ? m.quoted : m
   const mime = (q.msg || q).mimetype || ''
-  if (!mime) throw `*${tradutor.texto1}*`;
-  const buffer = await q.download();
-  const link = await uploadImage(buffer);
-  m.reply(`*${tradutor.texto2}* ${link}`);
-};
 
-handler.help = ['tourl'];
-handler.tags = ['converter'];
-handler.command = ['upload', 'uploader', 'tourl'];
+  if (!mime) return m.reply('˗ˏˋ ꒰ ✉︎ ꒱ ˎˊ˗  Responde o envía un archivo.')
 
-export default handler;
+  const { key: statusKey } = await m.reply('✧˚ ༘ ⋆｡˚  Subiendo archivo...')
+  const editStatus = async txt => {
+    try { await conn.sendMessage(m.chat, { text: txt, edit: statusKey }) } catch (_) {}
+  }
+
+  try {
+    const buffer  = await q.download()
+    const pesoTxt = buffer.length >= 1024 * 1024
+      ? `${(buffer.length / 1024 / 1024).toFixed(2)} MB`
+      : `${(buffer.length / 1024).toFixed(1)} KB`
+
+    const link = await uploadImage(buffer)
+    if (!link) return editStatus('˗ˏˋ ꒰ ✉︎ ꒱ ˎˊ˗  No se pudo obtener el enlace.')
+
+    const urlObj    = (() => { try { return new URL(link) } catch { return null } })()
+    const pathParts = urlObj?.pathname?.split('/').filter(Boolean) || []
+    const fileId    = pathParts[pathParts.length - 2] || pathParts[pathParts.length - 1] || '—'
+    const fileName  = pathParts[pathParts.length - 1] || link.split('/').pop() || '—'
+
+    await editStatus(
+      `ִֶָ𓂃 ࣪˖ ִֶָ  *FILE UPLOADED*  ִֶָ𓂃 ࣪˖ ִֶָ\n\n` +
+      `⭑ ₊ ⭒  *ID*    ꩜  \`${fileId}\`\n` +
+      `⭑ ₊ ⭒  *NAME*  ꩜  \`${fileName}\`\n` +
+      `⭑ ₊ ⭒  *PESO*  ꩜  \`${pesoTxt}\`\n` +
+      `⭑ ₊ ⭒  *MIME*  ꩜  \`${mime}\`\n\n` +
+      `˗ˏˋ ꒰ ✉︎ ꒱ ˎˊ˗  *URL*\n` +
+      `${link}\n\n` +
+      `✧˚ ༘ ⋆｡˚  𖥔 ࣪˖`
+    )
+  } catch (e) {
+    console.error('[tourl]', e.message)
+    await editStatus(`˗ˏˋ ꒰ ✉︎ ꒱ ˎˊ˗  Error: ${e.message}`)
+  }
+}
+
+handler.help    = ['tourl', 'upload <archivo>']
+handler.tags    = ['converter']
+handler.command = /^(upload|uploader|tourl)$/i
+
+export default handler
