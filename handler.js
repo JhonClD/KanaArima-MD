@@ -706,10 +706,30 @@ export async function handler(chatUpdate) {
 
     let usedPrefix;
     const _user = global.db.data && global.db.data.users && global.db.data.users[m.sender];
-    const groupMetadata = m.isGroup ? { ...(conn.chats[m.chat]?.metadata || await this.groupMetadata(m.chat).catch(_ => null) || {}), ...(((conn.chats[m.chat]?.metadata || await this.groupMetadata(m.chat).catch(_ => null) || {}).participants) && { participants: ((conn.chats[m.chat]?.metadata || await this.groupMetadata(m.chat).catch(_ => null) || {}).participants || []).map(p => ({ ...p, id: p.id || p.jid, jid: p.id || p.jid, lid: p.lid })) }) } : {};
-    //const groupMetadata = (m.isGroup ? ((conn.chats[m.chat] || {}).metadata || await this.groupMetadata(m.chat).catch((_) => null)) : {}) || {};
-    const participants = ((m.isGroup ? groupMetadata.participants : []) || []).map(participant => ({ id: participant.id || participant.jid, jid: participant.id || participant.jid, lid: participant.lid, admin: participant.admin }));
-    //const participants = (m.isGroup ? groupMetadata.participants : []) || [];
+    // Siempre hacer fetch fresco para tener admins actualizados (evita problemas de cache desactualizado)
+    let _cachedMeta = conn.chats[m.chat]?.metadata || null;
+    let _freshMeta = null;
+    if (m.isGroup) {
+      try { _freshMeta = await this.groupMetadata(m.chat); } catch (_) {}
+    }
+    const _rawMeta = m.isGroup ? (_freshMeta || _cachedMeta || {}) : {};
+    // Actualizar cache con datos frescos
+    if (_freshMeta && m.isGroup && conn.chats[m.chat]) {
+      conn.chats[m.chat].metadata = _freshMeta;
+    }
+    const _rawParticipants = (_rawMeta.participants || []).map(p => ({
+      ...p,
+      id: p.id || p.jid,
+      jid: p.id || p.jid,
+      lid: p.lid || null
+    }));
+    const groupMetadata = m.isGroup ? { ..._rawMeta, participants: _rawParticipants } : {};
+    const participants = _rawParticipants.map(participant => ({
+      id: participant.id || participant.jid,
+      jid: participant.id || participant.jid,
+      lid: participant.lid,
+      admin: participant.admin
+    }));
     // Pre-poblar cache LID→JID desde participantes (resuelve m.sender cuando es @lid)
     if (m.isGroup && participants.length > 0 && this.resolveLid?.bulkCacheFromParticipants) {
       this.resolveLid.bulkCacheFromParticipants(participants);
@@ -1165,7 +1185,18 @@ export async function participantsUpdate({ id, participants: _rawParticipants, a
       if (!text) {
         text = (chat?.sDemote || tradutor.texto4 || conn?.sdemote || '@user ```is no longer Admin```');
       }
-      text = text.replace('@user', '@' + participants[0].split('@')[0]);
+      // Normalizar participants[0] por si viene como JSON string o @lid
+      let _p0 = participants[0] || '';
+      // Si viene como JSON string, extraer phoneNumber o id
+      try {
+        const _parsed = JSON.parse(_p0);
+        if (_parsed && typeof _parsed === 'object') {
+          _p0 = _parsed.phoneNumber || _parsed.id || _p0;
+        }
+      } catch (_) {}
+      // Extraer solo el número (antes del @)
+      const _p0Number = _p0.includes('@') ? _p0.split('@')[0] : _p0;
+      text = text.replace('@user', '@' + _p0Number);
       if (chat.detect && !chat?.isBanned) {
         mconn?.conn?.sendMessage(id, { text, mentions: mconn?.conn?.parseMention(text) });
       }
