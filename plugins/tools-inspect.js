@@ -1,4 +1,4 @@
-import * as baileys from "@itsliaaa/baileys";
+import * as baileys from "baileys";
 
 const handler = async (m, {conn, text}) => {
   const datas = global

@@ -1,6 +1,6 @@
 import uploadImage from '../src/libraries/uploadImage.js';
 import {sticker} from '../src/libraries/sticker.js';
-import MessageType from "@itsliaaa/baileys";
+import MessageType from "baileys";
 
 
 const effects = ['greyscale', 'invert', 'brightness', 'threshold', 'sepia', 'red', 'green', 'blue', 'blurple', 'pixelate', 'blur'];
