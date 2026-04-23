@@ -32,7 +32,7 @@ export async function before(m, { conn, participants }) {
     }
     
     // Resolver el sender usando el sistema LID mejorado
-    const realSender = await resolveLidFromCache(m?.sender, m?.chat);
+    const realSender = await resolveLidFromCache(m?.sender, m?.chat, conn);
     
     const idioma = global.db?.data?.users[realSender]?.language || global.defaultLenguaje;
     const _translate = JSON.parse(fs.readFileSync(`./src/languages/${idioma}/_detectEvents.js.json`));
@@ -63,7 +63,7 @@ export async function before(m, { conn, participants }) {
     // Resolver todos los parámetros del stub usando el sistema LID
     const resolvedStubParameters = await Promise.all(
       (m.messageStubParameters || []).map(async (param) => {
-        return await resolveLidFromCache(param, m.chat);
+        return await resolveLidFromCache(param, m.chat, conn);
       })
     );
     
@@ -75,7 +75,7 @@ export async function before(m, { conn, participants }) {
       switch (m.messageStubType) {
         case 29:
           await safeOperation(async () => {
-            const userDisplay = getUserDisplayName(resolvedStubParameters[0]);
+            const userDisplay = getUserDisplayName(resolvedStubParameters[0], conn);
             let txt = `${tradutor.promote.header}\n\n${tradutor.promote.group.replace('@group', groupName)}\n${tradutor.promote.new_admin.replace('@user', userDisplay)}\n${tradutor.promote.executed_by.replace('@user', `@${realSender.split('@')[0]}`)}`;
             await conn.sendMessage(m.chat, { image: img || {url: pp}, caption: txt, mentions: mentionsString }, { quoted: fkontak2 });
           });
@@ -83,7 +83,7 @@ export async function before(m, { conn, participants }) {
 
         case 30:
           await safeOperation(async () => {
-            const userDisplay = getUserDisplayName(resolvedStubParameters[0]);
+            const userDisplay = getUserDisplayName(resolvedStubParameters[0], conn);
             let txt = `${tradutor.demote.header}\n\n${tradutor.demote.group.replace('@group', groupName)}\n${tradutor.demote.removed_admin.replace('@user', userDisplay)}\n${tradutor.demote.executed_by.replace('@user', `@${realSender.split('@')[0]}`)}`;
             await conn.sendMessage(m.chat, { image: img || {url: pp}, caption: txt, mentions: mentionsString }, { quoted: fkontak2 });
           });
@@ -91,7 +91,7 @@ export async function before(m, { conn, participants }) {
 
         case 27:
           await safeOperation(async () => {
-            const userDisplay = getUserDisplayName(resolvedStubParameters[0]);
+            const userDisplay = getUserDisplayName(resolvedStubParameters[0], conn);
             let txt = `${tradutor.member_add.header}\n\n${tradutor.member_add.group.replace('@group', groupName)}\n`;
             if (!realSender.endsWith('@g.us')) {
               txt += `${tradutor.member_add.added_user.replace('@user', userDisplay)}\n${tradutor.member_add.added_by.replace('@user', `@${realSender.split('@')[0]}`)}`;
@@ -104,7 +104,7 @@ export async function before(m, { conn, participants }) {
 
         case 28:
           await safeOperation(async () => {
-            const userDisplay = getUserDisplayName(resolvedStubParameters[0]);
+            const userDisplay = getUserDisplayName(resolvedStubParameters[0], conn);
             let txt = `${tradutor.member_remove.header}\n\n${tradutor.member_remove.group.replace('@group', groupName)}\n`;
             const isSelfRemoval = resolvedStubParameters[0] === realSender;
             if (!realSender.endsWith('@g.us')) {
@@ -122,7 +122,7 @@ export async function before(m, { conn, participants }) {
 
         case 32:
           await safeOperation(async () => {
-            const userDisplay = getUserDisplayName(resolvedStubParameters[0]);
+            const userDisplay = getUserDisplayName(resolvedStubParameters[0], conn);
             let txt = `${tradutor.member_remove.header}\n\n${tradutor.member_remove.group.replace('@group', groupName)}\n`;
             txt += `${tradutor.member_remove.self_removed.replace('@user', userDisplay)}`;
             await conn.sendMessage(m.chat, { image: { url: pp }, caption: txt, mentions: [resolvedStubParameters[0]] }, { quoted: fkontak2 });
