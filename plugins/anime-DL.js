@@ -23,7 +23,7 @@
 //   .animedl 7 naruto 25
 
 import { spawn }         from 'child_process'
-import { prepareWAMessageMedia, generateWAMessageFromContent, getDevice } from '@itsliaaa/baileys'
+import { prepareWAMessageMedia, generateWAMessageFromContent, getDevice } from 'baileys'
 import fs                from 'fs'
 import path              from 'path'
 import fetch             from 'node-fetch'

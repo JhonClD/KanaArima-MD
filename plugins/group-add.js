@@ -1,6 +1,6 @@
-const {generateWAMessageFromContent, prepareWAMessageMedia, proto} = (await import("@itsliaaa/baileys")).default;
+const {generateWAMessageFromContent, prepareWAMessageMedia, proto} = (await import("baileys")).default;
 import fetch from 'node-fetch';
-const {getBinaryNodeChild, getBinaryNodeChildren} = (await import("@itsliaaa/baileys")).default;
+const {getBinaryNodeChild, getBinaryNodeChildren} = (await import("baileys")).default;
 const handler = async (m, {conn, text, participants, args}) => {
   const idioma = global.db.data.users[m.sender].language || global.defaultLenguaje 
   const _translate = JSON.parse(fs.readFileSync(`./src/languages/${idioma}.json`))
