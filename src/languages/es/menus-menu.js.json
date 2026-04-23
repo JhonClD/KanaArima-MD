@@ -1,37 +1,37 @@
 {
     "plugins": {
         "menu": {
-            "menu_header": "╭═══〘 ✯✯✯✯✯✯✯✯✯ 〙══╮\n║ ◉— *KαɳαAɾιɱα-MD - Bot* —◉\n║≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡║\n║➤ *Hola,* @username\n║≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡║\n║➤ *Owner:* @author\n║➤ *Numero:* wa.me/@owner\n║➤ *Fecha:* @week, @date\n║➤ *Tiempo activo:* @uptime\n║➤ *Usuarios:* @rtotal\n║➤ *Registrados:* @rtotalreg\n╰═══╡✯✯✯✯✯✯✯✯✯╞═══╯",
-            "user_info": "┏━━━━━━━━━━━━━━━━┓\n┃ *< INFO DEL USUARIO />*\n┃≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡┃\n┣ ✯ *Nivel:* @level\n┣ ✯ *Experiencia:* @exp\n┣ ✯ *Rango:* @role\n┣ ✯ *Diamantes:* @limit\n┣ ✯ *MysticCoins:* @money\n┣ ✯ *Tokens:* @joincount\n┣ ✯ *Premium:* @premium\n┗━━━━━━━━━━━━━━━━┛\n",
-            "section_header": "┏━━━━━━━━━━━━━━━━┓\n┃ *@category*\n┃≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡┃",
-            "command_item": "┣ ඬ⃟  □ @cmd @islimit",
-            "section_footer": "┗━━━━━━━━━━━━━━━━┛\n",
-            "error_message": "[ ❌ ] Ocurrió un error al generar el menú:",
+            "menu_header": "˖ ࣪ ꉂ🗯˙🫐⃟.꩜\n‹—────୨ৎ────˙ . ꒷🪼 . 𖦹˙—꒷꒦︶꒷꒦︶\n\n◉— *KαɳαAɾιɱα-MD - Bot* —◉\n\n୨ৎ ‧₊˚ 🍓 ⋅ ☆｡𖦹°‧⋆\n\n𖦹˙—˙ . ꒷🪼 . ╰┈➤ *Hola,* @username\n╰┈➤ *Owner:* @author\n╰┈➤ *Número:* wa.me/@owner\n╰┈➤ *Fecha:* @week, @date\n╰┈➤ *⏔ Activo:* @uptime\n╰┈➤ *Usuarios:* @rtotal\n╰┈➤ *Registrados:* @rtotalreg\n\n˖ ݁𖥔 ݁˖  𐙚  ˖ ݁𖥔 ݁˖  ᯓᡣ𐭩  𖤐⭒๋࣭ ⭑",
+            "user_info": "⁺‧₊˚ ┊𓂃 ࣪˖ *< INFO DEL USUARIO />* ˖ 𓂃┊ ˚₊‧⁺\n꒷꒦︶ ⏝ ︶ ୨୧ ︶ ⏝ ︶꒷꒦︶\n⭑ *Nivel:* @level\n⭑ *Experiencia:* @exp\n⭑ *Rango:* @role\n⭑ *Diamantes:* @limit\n⭑ *MysticCoins:* @money\n⭑ *Tokens:* @joincount\n⭑ *Premium:* @premium\n꒷꒦︶ ⏝ ︶ ୨୧ ︶ ⏝ ︶꒷꒦︶\n",
+            "section_header": "✦•┈๑⋅⋯ ⋯⋅๑┈•✦\n⪼ ꒰ *@category* ꒱\n✦•┈๑⋅⋯ ⋯⋅๑┈•✦",
+            "command_item": "╰┈➤ □ @cmd @islimit",
+            "section_footer": "｡ ﾟ ꒰ঌ ✦໒꒱ ༘*.ﾟ\n",
+            "error_message": "⭒˗ˏˋ𓆩 ⚠ 𓆪ˎˊ˗⭒ Error al generar el menú:",
             "premium": {
                 "yes": "✅",
                 "no": "❌"
             },
             "tags": {
-                "info": "< INFORMACIÓN />",
-                "jadibot": "< SUBBOTS />",
-                "xp": "< XP — ECONOMÍA />",
-                "tools": "< HERRAMIENTAS />",
-                "search": "< BÚSQUEDAS />",
-                "downloader": "< DESCARGAS />",
-                "converter": "< CONVERTIDORES />",
-                "effects": "< EFECTOS DE AUDIO />",
-                "game": "< JUEGOS />",
-                "group": "< GRUPOS />",
-                "nsfw": "< ADULTOS />",
-                "owner": "< PROPIETARIOS />",
-                "sticker": "< STICKERS />",
-                "img": "< IMÁGENES />",
-                "ai": "< INTELIGENCIA ARTIFICIAL />",
-                "internet": "< INTERNET />",
-                "maker": "< CREADOR />",
-                "database": "< BASE DE DATOS />",
-                "random": "< ALEATORIO />",
-                "anime": "< ANIME />"
+                "info": "𓍢ִ໋☕️✧ INFORMACIÓN ✧☕️𓍢ִ໋",
+                "jadibot": "🎸⋆⭒˚｡⋆ SUBBOTS ⋆｡˚⭒⋆🎸",
+                "xp": "‧₊˚ 🍮 ⋅ XP — ECONOMÍA ⋅ 🍮 ˚₊‧",
+                "tools": "⋆˚✿˖° HERRAMIENTAS °˖✿˚⋆",
+                "search": "ᯓᡣ𐭩 BÚSQUEDAS ᡣ𐭩ᯓ",
+                "downloader": "📼˚ ༘ ೀ DESCARGAS ೀ ༘ ˚📼",
+                "converter": "𓌹*♰*𓌺 CONVERTIDORES 𓌺*♰*𓌹",
+                "effects": "🎧ྀི♪⋆. EFECTOS DE AUDIO .⋆♪🎧ྀི",
+                "game": "✩♬ ₊˚.🎧⋆ JUEGOS ⋆🎧.˚₊ ♬✩",
+                "group": "🏯｠ GRUPOS ｠🏯",
+                "nsfw": "⛧°. ⋆𓌹*♰*𓌺⋆. °⛧ ADULTOS ⛧°. ⋆𓌺*♰*𓌹⋆. °⛧",
+                "owner": "☥⋆.˚✮ PROPIETARIOS ✮˚.⋆☥",
+                "sticker": "૮₍ ´ ꒳ `₎ა STICKERS ა₍ ꒳ ` ₎ૢ",
+                "img": "°❀⋆.ೃ࿔ IMÁGENES ࿔ೃ.⋆❀°",
+                "ai": "𖤐꙳𓏲 IA — INTELIGENCIA ARTIFICIAL 𓏲꙳𖤐",
+                "internet": "⋆｡ﾟ☁︎｡⋆ INTERNET ⋆｡☁︎ﾟ｡⋆",
+                "maker": "˚˖𓍢✧˚ CREADOR ˚✧𓍢˖˚",
+                "database": "⊹˖ོ݁𓆉 BASE DE DATOS 𓆉ོ݁˖⊹",
+                "random": "⋆ ˚｡⋆୨୧˚ ALEATORIO ˚୨୧⋆｡˚ ⋆",
+                "anime": "𓆞༄･𓆝 ANIME 𓆝･༄𓆟"
             }
         }
     }
