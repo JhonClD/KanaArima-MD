@@ -1,4 +1,4 @@
-import Presence from "baileys";
+import Presence from "@itsliaaa/baileys";
 
 const handler = async (m, {conn, args, text}) => {
   const datas = global

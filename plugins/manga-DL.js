@@ -16,7 +16,7 @@
 //   .mangadl one piece 1000
 //   .mangadl berserk 1
 
-import { generateWAMessageFromContent, getDevice } from 'baileys'
+import { generateWAMessageFromContent, getDevice } from '@itsliaaa/baileys'
 import fs       from 'fs'
 import path     from 'path'
 import os       from 'os'

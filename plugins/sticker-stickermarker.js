@@ -1,6 +1,6 @@
 import uploadImage from '../src/libraries/uploadImage.js';
 import {sticker} from '../src/libraries/sticker.js';
-import MessageType from "baileys";
+import MessageType from "@itsliaaa/baileys";
 
 const effects = ['jail', 'gay', 'glass', 'wasted', 'triggered', 'lolice', 'simpcard', 'horny'];
 

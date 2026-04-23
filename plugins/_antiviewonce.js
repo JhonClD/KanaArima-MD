@@ -1,4 +1,4 @@
-/*const { downloadContentFromMessage } = (await import("baileys"));
+/*const { downloadContentFromMessage } = (await import("@itsliaaa/baileys"));
 import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 

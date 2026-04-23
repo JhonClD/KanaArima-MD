@@ -1,4 +1,4 @@
-import {generateWAMessageFromContent} from "baileys";
+import {generateWAMessageFromContent} from "@itsliaaa/baileys";
 import * as fs from 'fs';
 
 const handler = async (m, {conn, text, participants, isOwner, isAdmin}) => {

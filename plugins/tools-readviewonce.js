@@ -1,4 +1,4 @@
-const {downloadContentFromMessage} = (await import("baileys"));
+const {downloadContentFromMessage} = (await import("@itsliaaa/baileys"));
 
 const handler = async (m, {conn}) => {
   const datas = global

@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { prepareWAMessageMedia, generateWAMessageFromContent, getDevice } from "baileys";
+import { prepareWAMessageMedia, generateWAMessageFromContent, getDevice } from "@itsliaaa/baileys";
 
 const handler = async (m, {conn, args}) => {
   const datas = global

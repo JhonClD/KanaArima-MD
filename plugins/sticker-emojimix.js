@@ -1,5 +1,5 @@
 import {sticker} from '../src/libraries/sticker.js';
-import MessageType from "baileys";
+import MessageType from "@itsliaaa/baileys";
 import fetch from 'node-fetch';
 import fs from 'fs';
 

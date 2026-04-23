@@ -2,7 +2,7 @@
 /* GitHub: https://github.com/Gatito-kw */
 /* Bot: https://github.com/Gatito-kw/nekobot-md */
 
-import { WAMessageStubType } from "baileys";
+import { WAMessageStubType } from "@itsliaaa/baileys";
 import fetch from 'node-fetch';
 import fs from 'fs';
 
