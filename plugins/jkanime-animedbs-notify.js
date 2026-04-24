@@ -113,61 +113,107 @@ async function fetchLatestEpisodesJKAnime() {
   const $    = cheerio.load(data)
   const lista = []
 
-  // ── Selector principal: cada slide del hero carousel ─────────────────────
-  // .hero__items tiene data-setbg con la imagen y .slider-btns con los links
-  $('.hero__items').each((_, el) => {
-    const $el = $(el)
+  // ── Palabras clave a excluir (páginas de sistema, no episodios) ───────────
+  const EXCLUIR_SLUGS = new Set([
+    'buscar','categoria','categorias','notificaciones','contacto','login','registro',
+    'perfil','favoritos','historial','top','calendario','faq','horario','comunidad',
+    'directorio','temporada','genero','estado','pagina','page','anime','ver','donghuas','ovas',
+  ])
 
-    // Imagen del episodio: data-setbg en el contenedor
-    const imgSrc = $el.attr('data-setbg') || ''
-    const imgUrl = imgSrc.startsWith('http') ? imgSrc : ''
+  // ── Estrategia 1: sección de últimos episodios (grilla principal) ─────────
+  // JKAnime tiene cards de episodio fuera del slider con estructura:
+  //   .anime__item  o  .col-6/.col-lg-2  con <a href="/slug/N">
+  //   Imagen: <img data-src="..." /> o <img src="..." />
+  //   Título: h5, .anime__item__text h5, .title, .anime__item__title
+  //
+  // Selector amplio que captura distintas versiones del tema
+  const CARD_SELECTORS = [
+    '.capitulos_list .item',
+    '.anime__item',
+    '.col-6 .anime__item',
+    '.last_episodes .item',
+    '.list-episodes .item',
+    '.episodes-list .item',
+    'article.episode',
+    '.episodes .item',
+  ]
 
-    // Título: <h2> dentro de .hero__text
-    const titulo = $el.find('h2').first().text().trim()
-    if (!titulo) return
+  for (const sel of CARD_SELECTORS) {
+    $(sel).each((_, el) => {
+      const $el  = $(el)
+      const aTag = $el.find('a[href]').first()
+      const href = aTag.attr('href') || ''
+      if (!href) return
 
-    // Links: el primero es "Detalles" (/slug/), el segundo es "Ver ahora" (/slug/N)
-    // Tomamos TODOS los links con número al final
-    $el.find('.slider-btns a[href], a.slider-show[href]').each((__, aEl) => {
-      const href = $(aEl).attr('href') || ''
-      // Solo links de episodio: terminan en /slug/numero o /slug/numero/
-      const m = href.match(/\/([a-z0-9-]+)\/(\d+)\/?$/)
-      if (!m) return
+      // Solo URLs /slug/N o /slug/N/
+      const mep = href.match(/\/([a-z0-9][a-z0-9-]{2,})\/(\d+)\/?$/)
+      if (!mep) return
+      const slug  = mep[1].toLowerCase()
+      const epNum = parseInt(mep[2])
+      if (!epNum || EXCLUIR_SLUGS.has(slug)) return
 
-      const slug  = m[1]
-      const epNum = parseInt(m[2])
-      if (!epNum) return
+      const titulo =
+        ($el.find('h5, .anime__item__text h5, .title, .anime__item__title').first().text() ||
+         aTag.attr('title') || slug.replace(/-/g, ' ')).trim()
+      if (!titulo) return
 
-      const epUrl    = href.startsWith('http') ? href : JKANIME_URL + href
-      const normSlug = slug.toLowerCase()
-      const id       = `jk-${normSlug}-${epNum}`
+      const imgEl  = $el.find('img').first()
+      const imgSrc = imgEl.attr('data-src') || imgEl.attr('src') || ''
+      const imgUrl = imgSrc.startsWith('http') ? imgSrc : imgSrc ? JKANIME_URL + imgSrc : ''
+      const epUrl  = href.startsWith('http') ? href : JKANIME_URL + href
+      const id     = `jk-${slug}-${epNum}`
 
       if (!lista.find(e => e.id === id))
-        lista.push({ id, slug: normSlug, titulo, epNum, epUrl, imgUrl, fuente: 'jkanime' })
+        lista.push({ id, slug, titulo, epNum, epUrl, imgUrl, fuente: 'jkanime' })
     })
-  })
+    if (lista.length >= 5) break  // encontró con este selector, dejar de probar
+  }
 
-  // ── Fallback: sección de últimos episodios (fuera del slider) ────────────
-  // Algunos temas de JKAnime también tienen una sección debajo del slider
-  if (lista.length === 0) {
+  // ── Estrategia 2: cualquier <a href="/slug/N"> en la página ──────────────
+  // Captura la grilla aunque cambien las clases CSS del tema
+  if (lista.length < 5) {
     $('a[href]').each((_, el) => {
       const href = $(el).attr('href') || ''
-      const m    = href.match(/\/([a-z0-9-]{3,})\/(\d+)\/?$/)
-      if (!m) return
-      const slug  = m[1]
-      const epNum = parseInt(m[2])
-      if (!epNum || slug === 'page') return
-      const titulo   = ($(el).attr('title') || $(el).text() || slug.replace(/-/g, ' ')).trim()
-      const epUrl    = href.startsWith('http') ? href : JKANIME_URL + href
-      const normSlug = slug.toLowerCase()
-      const id       = `jk-${normSlug}-${epNum}`
+      const mep  = href.match(/\/([a-z0-9][a-z0-9-]{2,})\/(\d+)\/?$/)
+      if (!mep) return
+      const slug  = mep[1].toLowerCase()
+      const epNum = parseInt(mep[2])
+      if (!epNum || EXCLUIR_SLUGS.has(slug)) return
+
+      // Buscar título en el ancestro más cercano con texto útil
+      const $a     = $(el)
+      const titulo =
+        ($a.attr('title') ||
+         $a.closest('[class]').find('h5, h3, h2, .title, .name').first().text() ||
+         $a.text() ||
+         slug.replace(/-/g, ' ')).trim()
+      if (!titulo || titulo.length < 3) return
+
+      // Imagen del ancestro
+      const imgEl  = $a.closest('[class]').find('img').first()
+      const imgSrc = imgEl.attr('data-src') || imgEl.attr('src') || ''
+      const imgUrl = imgSrc.startsWith('http') ? imgSrc : imgSrc ? JKANIME_URL + imgSrc : ''
+      const epUrl  = href.startsWith('http') ? href : JKANIME_URL + href
+      const id     = `jk-${slug}-${epNum}`
+
       if (!lista.find(e => e.id === id))
-        lista.push({ id, slug: normSlug, titulo, epNum, epUrl, imgUrl: '', fuente: 'jkanime' })
+        lista.push({ id, slug, titulo, epNum, epUrl, imgUrl, fuente: 'jkanime' })
     })
   }
 
-  console.log(`[jkanime-notify] JKAnime: ${lista.length} episodios en portada`)
-  return lista
+  // ── Eliminar duplicados de mismo slug (quedarse con el más reciente) ──────
+  // Si la grilla muestra ep 4, 3, 2 del mismo anime, solo conservar el 4
+  const porSlug = new Map()
+  for (const ep of lista) {
+    const prev = porSlug.get(ep.slug)
+    if (!prev || ep.epNum > prev.epNum) porSlug.set(ep.slug, ep)
+  }
+  const listaSinDuplicados = [...porSlug.values()]
+
+  // Reordenar por posición original (el Map conserva orden de inserción del más reciente)
+  // Que coincide con el orden de aparición en la grilla (más reciente arriba/primero)
+  console.log(`[jkanime-notify] JKAnime: ${listaSinDuplicados.length} episodios únicos (de ${lista.length} encontrados)`)
+  return listaSinDuplicados
 }
 
 // ─── AnimeDBS — scraping de portada ──────────────────────────────────────────
@@ -1205,90 +1251,48 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     return m.reply(`⏱️ Intervalo actualizado a *${min} minutos*.`)
   }
 
-  // ── Helper: enviar lista interactiva de episodios ──────────────────────────
-  // Guarda estado en global.jkPendingPick (chatId → { eps, owner, timestamp })
-  // El handler.before lo procesa cuando llega la respuesta del usuario.
-  const enviarListaEpisodios = async (lista, fuente) => {
-    const MAX_EP = 10
-    const eps    = lista.slice(0, MAX_EP)
-    const titulo = `🎌 Episodios recientes — ${fuente}`
-    const body   = `${eps.length} episodio(s) disponible(s). Elige cuál descargar:`
-
-    // Guardar estado de selección pendiente
-    if (!global.jkPendingPick) global.jkPendingPick = new Map()
-    global.jkPendingPick.set(m.chat, { eps, owner: m.sender, timestamp: Date.now() })
-
-    const rows = eps.map((ep, i) => ({
-      title      : ep.titulo,
-      description: `Ep ${zeroPad(ep.epNum)}${ep.idioma ? ' · ' + ep.idioma : ''}`,
-      id         : `__jkpick__${i}`,
-    }))
-
-    // Intentar botones nativos (móvil)
-    try {
-      const baileys = await import('baileys')
-      const { generateWAMessageFromContent, getDevice } = baileys
-      const device   = getDevice(m.key.id)
-      const isMobile = device !== 'desktop' && device !== 'web'
-      if (isMobile) {
-        const interactiveMessage = {
-          body  : { text: body },
-          footer: { text: global.wm || 'Kana Arima Bot' },
-          header: { title: titulo, hasMediaAttachment: false },
-          nativeFlowMessage: {
-            buttons: [{
-              name: 'single_select',
-              buttonParamsJson: JSON.stringify({
-                title   : 'VER EPISODIOS',
-                sections: [{ title: 'Episodios disponibles', rows }],
-              }),
-            }],
-            messageParamsJson: '',
-          },
-        }
-        const msg = generateWAMessageFromContent(
-          m.chat,
-          { viewOnceMessage: { message: { interactiveMessage } } },
-          { userJid: conn.user.jid, quoted: m }
-        )
-        await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
-        return
-      }
-    } catch (_) {}
-
-    // Fallback: texto plano con letras (a, b, c…)
-    const lineas = eps.map((ep, i) => {
-      const letra = String.fromCharCode(97 + i)
-      return `*${letra}.* ${ep.titulo} — Ep ${zeroPad(ep.epNum)}${ep.idioma ? ' [' + ep.idioma + ']' : ''}`
-    })
-    await m.reply(
-      `*${titulo}*\n\n` +
-      lineas.join('\n') +
-      `\n\n_Responde con la letra para descargar (ej: *a*)_`
-    )
-  }
-
-  // ── .jkexample [N] — lista interactiva de episodios recientes JKAnime ─────
+  // ── .jkexample — encola todos los episodios recientes de JKAnime ───────────
   if (command === 'jkexample') {
     await m.reply(`🔍 Obteniendo episodios recientes de *JKAnime*...`)
     let lista = []
     try {
       lista = await fetchLatestEpisodesJKAnime()
       if (!lista.length) return m.reply(`❌ Sin episodios de JKAnime disponibles. Intenta más tarde.`)
-    } catch (err) { return m.reply(`❌ Error al obtener episodios: ${err.message}`) }
-    // El scraper devuelve en orden de portada (más reciente primero = índice 0)
-    return enviarListaEpisodios(lista, 'JKAnime 🇯🇵')
+    } catch (err) { return m.reply(`❌ Error: ${err.message}`) }
+
+    const cantidad = Math.min(Math.max(parseInt(text?.trim()) || lista.length, 1), lista.length)
+    const seleccion = lista.slice(0, cantidad)
+
+    await m.reply(
+      `📋 *${seleccion.length} episodio(s) en cola (JKAnime 🇯🇵):*\n\n` +
+      seleccion.map((e, i) => `${i + 1}. *${e.titulo}* — Ep ${zeroPad(e.epNum)}`).join('\n') +
+      `\n\n⏳ _Se enviarán de uno en uno..._`
+    )
+    for (const ep of seleccion) global.jkEpisodeQueue.push({ chatId: m.chat, ep })
+    procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
+    return
   }
 
-  // ── .dbsexample [N] — lista interactiva de episodios recientes AnimeDBS ───
+  // ── .dbsexample — encola todos los episodios recientes de AnimeDBS ─────────
   if (command === 'dbsexample') {
     await m.reply(`🔍 Obteniendo episodios recientes de *AnimeDBS*...`)
     let lista = []
     try {
       lista = await fetchLatestEpisodesAnimeDBS()
       if (!lista.length) return m.reply(`❌ Sin episodios de AnimeDBS disponibles. Intenta más tarde.`)
-    } catch (err) { return m.reply(`❌ Error al obtener episodios: ${err.message}`) }
-    return enviarListaEpisodios(lista, 'AnimeDBS 🌐')
+    } catch (err) { return m.reply(`❌ Error: ${err.message}`) }
+
+    const cantidad = Math.min(Math.max(parseInt(text?.trim()) || lista.length, 1), lista.length)
+    const seleccion = lista.slice(0, cantidad)
+
+    await m.reply(
+      `📋 *${seleccion.length} episodio(s) en cola (AnimeDBS 🌐):*\n\n` +
+      seleccion.map((e, i) => `${i + 1}. *${e.titulo}* — Ep ${zeroPad(e.epNum)}${e.idioma ? ' [' + e.idioma + ']' : ''}`).join('\n') +
+      `\n\n⏳ _Se enviarán de uno en uno..._`
+    )
+    for (const ep of seleccion) global.jkEpisodeQueue.push({ chatId: m.chat, ep })
+    procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
+    return
   }
 }
 
@@ -1302,57 +1306,8 @@ handler.limit   = false
 handler.before = async (m, { conn }) => {
   if (conn) global.jkConn = conn
   restaurarNotificadores(conn)
-
-  // ── Procesar selección de episodio desde lista interactiva ─────────────────
-  if (!global.jkPendingPick) global.jkPendingPick = new Map()
-
-  // Respuesta de botón nativeFlow (móvil)
-  const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
-  if (nativeFlow) {
-    try {
-      const params     = JSON.parse(nativeFlow.paramsJson || '{}')
-      const selectedId = params?.id || null
-      if (selectedId?.startsWith('__jkpick__')) {
-        const pick = global.jkPendingPick.get(m.chat)
-        if (!pick) return false
-        if (pick.owner && pick.owner !== m.sender) return false
-        const idx = parseInt(selectedId.replace('__jkpick__', ''))
-        const ep  = pick.eps[idx]
-        if (!ep) return false
-        global.jkPendingPick.delete(m.chat)
-        const c = global.jkConn
-        if (c) {
-          global.jkEpisodeQueue.push({ chatId: m.chat, ep })
-          procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
-          await conn.sendMessage(m.chat, { text: `✅ *${ep.titulo}* Ep ${zeroPad(ep.epNum)} añadido a la cola.` }, { quoted: m })
-        }
-        return true
-      }
-    } catch (_) {}
-    return false
-  }
-
-  // Respuesta con letra (a, b, c…) para desktop/web
-  const letra = m.text?.trim().toLowerCase()
-  if (/^[a-j]$/.test(letra)) {
-    const pick = global.jkPendingPick.get(m.chat)
-    if (pick && Date.now() - pick.timestamp < 5 * 60 * 1000) {
-      if (pick.owner && pick.owner !== m.sender) return false
-      const idx = letra.charCodeAt(0) - 97
-      const ep  = pick.eps[idx]
-      if (!ep) {
-        await conn.sendMessage(m.chat, { text: `❌ Letra inválida. Elige entre *a* y *${String.fromCharCode(97 + pick.eps.length - 1)}*.` }, { quoted: m })
-        return true
-      }
-      global.jkPendingPick.delete(m.chat)
-      global.jkEpisodeQueue.push({ chatId: m.chat, ep })
-      procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
-      await conn.sendMessage(m.chat, { text: `✅ *${ep.titulo}* Ep ${zeroPad(ep.epNum)} añadido a la cola.` }, { quoted: m })
-      return true
-    }
-  }
-
   return false
 }
+
 
 export default handler
