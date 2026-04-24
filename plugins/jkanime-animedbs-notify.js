@@ -92,56 +92,63 @@ function ordenarServidores(srvs, fuente) {
 
 // ─── JKAnime — scraping de portada ───────────────────────────────────────────
 //
-// JKAnime lista episodios recientes con estructura:
-// <div class="anime__item">
-//   <a href="/naruto-shippuden/500/">
-//     <div class="anime__item__pic" data-setbg="...img..."></div>
-//   </a>
-//   <div class="anime__item__text">
-//     <h5><a href="/naruto-shippuden/500/">Naruto Shippuden</a></h5>
-//     <ul><li class="episode">Episodio 500</li></ul>
+// Estructura real de JKAnime (portada):
+//
+//   <div class="hero__items set-bg" data-setbg="...cdn.../image/jkvideo_xxx.jpg">
+//     <div class="hero__text">
+//       <h2>Dr. Stone: Science Future Part 3</h2>
+//       <p>Descripción...</p>
+//     </div>
+//     <div class="slider-btns">
+//       <a href="https://jkanime.net/slug-del-anime/">Detalles</a>
+//       <a href="https://jkanime.net/slug-del-anime/4">Ver ahora</a>  ← URL del episodio
+//     </div>
 //   </div>
-// </div>
+//
+// El link del episodio (el "Ver ahora") tiene el número al final: /slug/N
+// La imagen está en data-setbg del contenedor .hero__items
 
 async function fetchLatestEpisodesJKAnime() {
   const { data } = await axios.get(JKANIME_URL, { headers: HEADERS, timeout: 15000 })
   const $    = cheerio.load(data)
   const lista = []
 
-  // Selector principal — bloque de episodio reciente de JKAnime
-  $('.anime__item, .last_episode, [class*="episode-item"], [class*="episodio"]').each((_, el) => {
-    const $el  = $(el)
-    const aTag = $el.find('a[href]').first()
-    const href = aTag.attr('href') || ''
-    if (!href) return
+  // ── Selector principal: cada slide del hero carousel ─────────────────────
+  // .hero__items tiene data-setbg con la imagen y .slider-btns con los links
+  $('.hero__items').each((_, el) => {
+    const $el = $(el)
 
-    // URLs de episodio: /slug-del-anime/numero/ o /slug/num/
-    const m = href.match(/\/([a-z0-9-]+)\/(\d+)\/?$/)
-    if (!m) return
+    // Imagen del episodio: data-setbg en el contenedor
+    const imgSrc = $el.attr('data-setbg') || ''
+    const imgUrl = imgSrc.startsWith('http') ? imgSrc : ''
 
-    const slug  = m[1]
-    const epNum = parseInt(m[2])
-    if (!epNum) return
+    // Título: <h2> dentro de .hero__text
+    const titulo = $el.find('h2').first().text().trim()
+    if (!titulo) return
 
-    const titulo =
-      ($el.find('h5, h4, h3, .title, [class*="title"]').first().text() || '').trim() ||
-      aTag.attr('title') ||
-      slug.replace(/-/g, ' ')
+    // Links: el primero es "Detalles" (/slug/), el segundo es "Ver ahora" (/slug/N)
+    // Tomamos TODOS los links con número al final
+    $el.find('.slider-btns a[href], a.slider-show[href]').each((__, aEl) => {
+      const href = $(aEl).attr('href') || ''
+      // Solo links de episodio: terminan en /slug/numero o /slug/numero/
+      const m = href.match(/\/([a-z0-9-]+)\/(\d+)\/?$/)
+      if (!m) return
 
-    // JKAnime usa data-setbg para lazy-load de imágenes
-    const imgEl  = $el.find('[data-setbg], img').first()
-    const imgSrc = imgEl.attr('data-setbg') || imgEl.attr('data-src') || imgEl.attr('src') || ''
-    const imgUrl = imgSrc.startsWith('http') ? imgSrc : imgSrc ? JKANIME_URL + imgSrc : ''
+      const slug  = m[1]
+      const epNum = parseInt(m[2])
+      if (!epNum) return
 
-    const epUrl     = href.startsWith('http') ? href : JKANIME_URL + href
-    const normSlug  = slug.replace(/-(?:sub|hd|fhd|1080p|720p)$/i, '').toLowerCase()
-    const id        = `jk-${normSlug}-${epNum}`
+      const epUrl    = href.startsWith('http') ? href : JKANIME_URL + href
+      const normSlug = slug.toLowerCase()
+      const id       = `jk-${normSlug}-${epNum}`
 
-    if (!lista.find(e => e.id === id))
-      lista.push({ id, slug: normSlug, titulo: titulo.trim(), epNum, epUrl, imgUrl, fuente: 'jkanime' })
+      if (!lista.find(e => e.id === id))
+        lista.push({ id, slug: normSlug, titulo, epNum, epUrl, imgUrl, fuente: 'jkanime' })
+    })
   })
 
-  // Fallback: cualquier link /slug/numero/
+  // ── Fallback: sección de últimos episodios (fuera del slider) ────────────
+  // Algunos temas de JKAnime también tienen una sección debajo del slider
   if (lista.length === 0) {
     $('a[href]').each((_, el) => {
       const href = $(el).attr('href') || ''
@@ -149,7 +156,7 @@ async function fetchLatestEpisodesJKAnime() {
       if (!m) return
       const slug  = m[1]
       const epNum = parseInt(m[2])
-      if (!epNum) return
+      if (!epNum || slug === 'page') return
       const titulo   = ($(el).attr('title') || $(el).text() || slug.replace(/-/g, ' ')).trim()
       const epUrl    = href.startsWith('http') ? href : JKANIME_URL + href
       const normSlug = slug.toLowerCase()
@@ -236,97 +243,145 @@ async function fetchLatestEpisodesAnimeDBS() {
   return lista
 }
 
-// ─── JKAnime — scraping de servidores de un episodio ─────────────────────────
+// ─── JKAnime — obtener descarga de un episodio ───────────────────────────────
 //
-// JKAnime carga los reproductores vía JavaScript. Los servers se listan en:
-//   var servers = [{"server":"...","embed":"..."},...]
-// o en botones .server-item con data-video / data-url
+// JKAnime expone un endpoint AJAX autenticado por CSRF:
+//   GET /ajax/download_episode/{episode_id}
+// Responde JSON: { url: "https://...", nombre: "slug-ep-N.mp4" }
+//
+// El episode_id numérico está en el HTML de la página del episodio:
+//   <a id="jkdown" href="/ajax/download_episode/72697">Descargar</a>
+//   o bien en el onclick del botón #jkdown:
+//   url:"/ajax/download_episode/72697"
+//
+// Estrategia:
+//  1. Cargar página del episodio y extraer el ID numérico
+//  2. Llamar a la API con el CSRF token de la página
+//  3. Si la API falla, buscar servidores embed en el HTML como fallback
 
 async function scrapeServidoresJKAnime(epUrl) {
-  const { data } = await axios.get(epUrl, { headers: { ...HEADERS, Referer: JKANIME_URL }, timeout: 15000 })
-  const $    = cheerio.load(data)
+  // ── Paso 1: cargar página del episodio ────────────────────────────────────
+  let html
+  try {
+    const res = await axios.get(epUrl, { headers: { ...HEADERS, Referer: JKANIME_URL }, timeout: 15000 })
+    html = res.data
+  } catch (err) {
+    throw new Error(`JKAnime: error cargando página episodio — ${err.message}`)
+  }
+
+  const $ = cheerio.load(html)
+
+  // ── Paso 2: extraer episode ID y CSRF token ───────────────────────────────
+  // <a id="jkdown" ...> con href o URL en onclick/ajax
+  let episodeId = null
+
+  // Método A: href o data en el botón #jkdown
+  const jkdownHref = $('#jkdown').attr('href') || ''
+  const mHref = jkdownHref.match(/\/ajax\/download_episode\/(\d+)/)
+  if (mHref) episodeId = mHref[1]
+
+  // Método B: buscar en los scripts inline el patrón /ajax/download_episode/N
+  if (!episodeId) {
+    $('script').each((_, el) => {
+      const code = $(el).html() || ''
+      const mScript = code.match(/\/ajax\/download_episode\/(\d+)/)
+      if (mScript) { episodeId = mScript[1]; return false }
+    })
+  }
+
+  // Método C: buscar en cualquier atributo data-* o href de la página
+  if (!episodeId) {
+    $('[href*="/ajax/download_episode/"], [data-url*="/ajax/download_episode/"]').each((_, el) => {
+      const val = $(el).attr('href') || $(el).attr('data-url') || ''
+      const m   = val.match(/\/ajax\/download_episode\/(\d+)/)
+      if (m) { episodeId = m[1]; return false }
+    })
+  }
+
+  // CSRF token (meta tag)
+  const csrfToken = $('meta[name="csrf-token"]').attr('content') || ''
+
   const srvs = []
 
-  // ── 1. var servers = [...] en el HTML ─────────────────────────────────────
-  $('script').each((_, el) => {
-    const code = $(el).html() || ''
-
-    // Patrón: var servers = [{"server":"mega","embed":"https://..."}]
-    const mArr = code.match(/var\s+(?:servers|videos|reproductores)\s*=\s*(\[[\s\S]*?\])\s*[;,\n]/)
-    if (mArr) {
-      try {
-        const arr = JSON.parse(mArr[1])
-        for (const item of arr) {
-          const url    = item.embed || item.url || item.file || item.code || ''
-          const nombre = (item.server || item.title || item.label || '').toLowerCase()
-          if (!url.startsWith('http') || srvs.find(s => s.url === url)) continue
-          const sinSoporte = url.includes('hqq.tv') || url.includes('netu.tv')
-          if (sinSoporte) continue
-          const esMega      = url.includes('mega.nz')
-          const esMediafire = url.includes('mediafire.com')
-          srvs.push({
-            nombre  : esMega ? 'mega' : esMediafire ? 'mediafire' : nombre || detectarServNombre(url),
-            url,
-            directo : esMega || esMediafire,
-          })
-        }
-      } catch (_) {}
-    }
-
-    // Patrón de par [["servidor","url"],...] (igual que TioAnime)
-    const mPar = code.match(/var\s+videos\s*=\s*(\[\s*\[[\s\S]*?\]\s*\])\s*[;,]?/)
-    if (mPar) {
-      try {
-        for (const item of JSON.parse(mPar[1])) {
-          if (!Array.isArray(item) || !item[1]?.startsWith('http')) continue
-          const url    = item[1]
-          const nombre = String(item[0]).toLowerCase()
-          if (srvs.find(s => s.url === url)) continue
-          const sinSoporte = url.includes('hqq.tv') || url.includes('netu.tv')
-          if (sinSoporte) continue
-          const esMega      = url.includes('mega.nz')
-          const esMediafire = url.includes('mediafire.com')
-          srvs.push({ nombre: esMega ? 'mega' : esMediafire ? 'mediafire' : nombre, url, directo: esMega || esMediafire })
-        }
-      } catch (_) {}
-    }
-  })
-
-  // ── 2. Botones de servidor con data-video o data-url ──────────────────────
-  $('[data-video], [data-url], [data-embed], .server-item').each((_, el) => {
-    const raw = $(el).attr('data-video') || $(el).attr('data-url') || $(el).attr('data-embed') || ''
-    let embedUrl = raw
+  // ── Paso 3: llamar API de descarga si tenemos el ID ───────────────────────
+  if (episodeId) {
     try {
-      const decoded = Buffer.from(raw, 'base64').toString('utf-8')
-      if (decoded.startsWith('http')) embedUrl = decoded
-    } catch (_) {}
-    if (!embedUrl.startsWith('http') || srvs.find(s => s.url === embedUrl)) return
-    const sinSoporte = embedUrl.includes('hqq.tv') || embedUrl.includes('netu.tv')
-    if (sinSoporte) return
-    const nombre = $(el).text().trim().toLowerCase() || detectarServNombre(embedUrl)
-    srvs.push({ nombre, url: embedUrl, directo: false })
-  })
+      console.log(`[jkanime-notify] JKAnime API descarga: /ajax/download_episode/${episodeId}`)
+      const apiRes = await axios.get(`${JKANIME_URL}/ajax/download_episode/${episodeId}`, {
+        headers: {
+          ...HEADERS,
+          Referer     : epUrl,
+          'X-CSRF-TOKEN'      : csrfToken,
+          'X-Requested-With'  : 'XMLHttpRequest',
+        },
+        timeout: 12000,
+      })
+      // Respuesta: { url: "https://...", nombre: "archivo.mp4" }
+      const dlUrl    = apiRes.data?.url   || ''
+      const dlNombre = apiRes.data?.nombre || ''
+      if (dlUrl.startsWith('http')) {
+        const esMega      = dlUrl.includes('mega.nz')
+        const esMediafire = dlUrl.includes('mediafire.com')
+        const nombre = esMega ? 'mega' : esMediafire ? 'mediafire' : detectarServNombre(dlUrl)
+        srvs.push({ nombre, url: dlUrl, directo: esMega || esMediafire, apiNombre: dlNombre })
+        console.log(`[jkanime-notify] JKAnime API OK → ${nombre}: ${dlUrl.slice(0, 80)}`)
+      }
+    } catch (err) {
+      console.log(`[jkanime-notify] JKAnime API descarga falló (${err.message}), usando fallback HTML`)
+    }
+  } else {
+    console.log(`[jkanime-notify] JKAnime: no se encontró episode ID en ${epUrl}`)
+  }
 
-  // ── 3. Links directos en el HTML (Mega / MediaFire / GoFile) ─────────────
-  $('a[href]').each((_, el) => {
-    const href = $(el).attr('href') || ''
-    if (!href.startsWith('http')) return
-    const esMega      = href.includes('mega.nz') || href.includes('mega.co.nz')
-    const esMediafire = href.includes('mediafire.com')
-    const esGofile    = href.includes('gofile.io')
-    const es1fichier  = href.includes('1fichier.com')
-    if (!esMega && !esMediafire && !esGofile && !es1fichier) return
-    if (srvs.find(s => s.url === href)) return
-    const nombre = esMega ? 'mega' : esMediafire ? 'mediafire' : esGofile ? 'gofile' : '1fichier'
-    srvs.push({ nombre, url: href, directo: true })
-  })
-
-  // ── 4. iframes como último recurso ────────────────────────────────────────
+  // ── Paso 4: fallback — buscar servidores embed en el HTML ─────────────────
+  // JKAnime también puede tener var servers = [...] o botones .servers
   if (srvs.length === 0) {
-    $('iframe[src]').each((_, el) => {
-      const src = $(el).attr('src') || ''
-      if (src.startsWith('http')) srvs.push({ nombre: detectarServNombre(src), url: src, directo: false })
+    $('script').each((_, el) => {
+      const code = $(el).html() || ''
+
+      const mArr = code.match(/var\s+(?:servers|videos|reproductores)\s*=\s*(\[[\s\S]*?\])\s*[;,\n]/)
+      if (mArr) {
+        try {
+          for (const item of JSON.parse(mArr[1])) {
+            const url    = item.embed || item.url || item.file || item.code || ''
+            const nombre = (item.server || item.title || item.label || '').toLowerCase()
+            if (!url.startsWith('http') || srvs.find(s => s.url === url)) continue
+            const sinSoporte = url.includes('hqq.tv') || url.includes('netu.tv')
+            if (sinSoporte) continue
+            const esMega = url.includes('mega.nz'), esMediafire = url.includes('mediafire.com')
+            srvs.push({ nombre: esMega ? 'mega' : esMediafire ? 'mediafire' : nombre || detectarServNombre(url), url, directo: esMega || esMediafire })
+          }
+        } catch (_) {}
+      }
     })
+
+    // Botones .servers con data-video
+    $('[data-video], [data-url], [data-embed]').each((_, el) => {
+      const raw = $(el).attr('data-video') || $(el).attr('data-url') || $(el).attr('data-embed') || ''
+      let embedUrl = raw
+      try { const dec = Buffer.from(raw, 'base64').toString('utf-8'); if (dec.startsWith('http')) embedUrl = dec } catch (_) {}
+      if (!embedUrl.startsWith('http') || srvs.find(s => s.url === embedUrl)) return
+      srvs.push({ nombre: $(el).text().trim().toLowerCase() || detectarServNombre(embedUrl), url: embedUrl, directo: false })
+    })
+
+    // Links directos
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href') || ''
+      if (!href.startsWith('http')) return
+      const esMega = href.includes('mega.nz'), esMediafire = href.includes('mediafire.com')
+      const esGofile = href.includes('gofile.io'), es1fichier = href.includes('1fichier.com')
+      if (!esMega && !esMediafire && !esGofile && !es1fichier) return
+      if (srvs.find(s => s.url === href)) return
+      srvs.push({ nombre: esMega ? 'mega' : esMediafire ? 'mediafire' : esGofile ? 'gofile' : '1fichier', url: href, directo: true })
+    })
+
+    // iframes último recurso
+    if (srvs.length === 0) {
+      $('iframe[src]').each((_, el) => {
+        const src = $(el).attr('src') || ''
+        if (src.startsWith('http')) srvs.push({ nombre: detectarServNombre(src), url: src, directo: false })
+      })
+    }
   }
 
   console.log(`[jkanime-notify] JKAnime servidores (${srvs.length}): ${srvs.map(s => s.nombre).join(', ')}`)
@@ -757,13 +812,17 @@ async function enviarEpisodio(chatId, ep, conn) {
     let videoPath = null
     for (const srv of orden) {
       try {
+        // Si la API de JKAnime proveyó un nombre de archivo, usarlo (ya incluye extensión)
+        const fileNameFinal = (srv.apiNombre && srv.apiNombre.endsWith('.mp4'))
+          ? safeFile(srv.apiNombre)
+          : fileName
         console.log(`[jkanime-notify] Intentando: ${srv.nombre} — ${srv.url.slice(0, 80)}`)
         if (srv.nombre === 'mega') {
-          videoPath = await descargarMega(srv.url, tmpDir, fileName)
+          videoPath = await descargarMega(srv.url, tmpDir, fileNameFinal)
         } else if (srv.nombre === 'mediafire') {
-          videoPath = await descargarMediaFire(srv.url, tmpDir, fileName)
+          videoPath = await descargarMediaFire(srv.url, tmpDir, fileNameFinal)
         } else {
-          videoPath = await descargarEmbed(srv.url, tmpDir, fileName, referer)
+          videoPath = await descargarEmbed(srv.url, tmpDir, fileNameFinal, referer)
         }
         break
       } catch (err) {
