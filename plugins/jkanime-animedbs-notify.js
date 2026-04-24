@@ -79,7 +79,7 @@ function detectarServNombre(url) {
 }
 
 function ordenarServidores(srvs, fuente) {
-  const prioridad = ['mega', 'mediafire', 'gofile', '1fichier']
+  const prioridad = ['mediafire', 'mega', 'gofile', '1fichier']
   return [...srvs].sort((a, b) => {
     const ia = prioridad.indexOf(a.nombre)
     const ib = prioridad.indexOf(b.nombre)
@@ -243,144 +243,209 @@ async function fetchLatestEpisodesAnimeDBS() {
   return lista
 }
 
-// ─── JKAnime — obtener descarga de un episodio ───────────────────────────────
+// ─── JKAnime — obtener servidores de descarga de un episodio ─────────────────
 //
-// JKAnime expone un endpoint AJAX autenticado por CSRF:
-//   GET /ajax/download_episode/{episode_id}
-// Responde JSON: { url: "https://...", nombre: "slug-ep-N.mp4" }
-//
-// El episode_id numérico está en el HTML de la página del episodio:
-//   <a id="jkdown" href="/ajax/download_episode/72697">Descargar</a>
-//   o bien en el onclick del botón #jkdown:
-//   url:"/ajax/download_episode/72697"
-//
-// Estrategia:
-//  1. Cargar página del episodio y extraer el ID numérico
-//  2. Llamar a la API con el CSRF token de la página
-//  3. Si la API falla, buscar servidores embed en el HTML como fallback
+// Estrategia multi-capa (de mayor a menor confiabilidad):
+//  1. API /ajax/episode/2/?id=<slug>&cap=<N>&server=<srv>  (misma que usa anime-DL)
+//     Decodifica el campo "remote" en base64 y resuelve redirects de jkplayers
+//  2. API /ajax/download_episode/<ID>  (con CSRF del HTML)
+//  3. Fallback HTML: var servers/videos en scripts, data-video, links directos
 
 async function scrapeServidoresJKAnime(epUrl) {
-  // ── Paso 1: cargar página del episodio ────────────────────────────────────
-  let html
-  try {
-    const res = await axios.get(epUrl, { headers: { ...HEADERS, Referer: JKANIME_URL }, timeout: 15000 })
-    html = res.data
-  } catch (err) {
-    throw new Error(`JKAnime: error cargando página episodio — ${err.message}`)
-  }
-
-  const $ = cheerio.load(html)
-
-  // ── Paso 2: extraer episode ID y CSRF token ───────────────────────────────
-  // <a id="jkdown" ...> con href o URL en onclick/ajax
-  let episodeId = null
-
-  // Método A: href o data en el botón #jkdown
-  const jkdownHref = $('#jkdown').attr('href') || ''
-  const mHref = jkdownHref.match(/\/ajax\/download_episode\/(\d+)/)
-  if (mHref) episodeId = mHref[1]
-
-  // Método B: buscar en los scripts inline el patrón /ajax/download_episode/N
-  if (!episodeId) {
-    $('script').each((_, el) => {
-      const code = $(el).html() || ''
-      const mScript = code.match(/\/ajax\/download_episode\/(\d+)/)
-      if (mScript) { episodeId = mScript[1]; return false }
-    })
-  }
-
-  // Método C: buscar en cualquier atributo data-* o href de la página
-  if (!episodeId) {
-    $('[href*="/ajax/download_episode/"], [data-url*="/ajax/download_episode/"]').each((_, el) => {
-      const val = $(el).attr('href') || $(el).attr('data-url') || ''
-      const m   = val.match(/\/ajax\/download_episode\/(\d+)/)
-      if (m) { episodeId = m[1]; return false }
-    })
-  }
-
-  // CSRF token (meta tag)
-  const csrfToken = $('meta[name="csrf-token"]').attr('content') || ''
-
   const srvs = []
 
-  // ── Paso 3: llamar API de descarga si tenemos el ID ───────────────────────
-  if (episodeId) {
+  // Extraer slug y número de capítulo de la URL
+  // Soporta: /slug/N  /slug/N/  /slug/N.html
+  const jkMatch = epUrl.match(/jkanime\.net\/([^/]+)\/(\d+)/)
+  const slug    = jkMatch?.[1]
+  const cap     = jkMatch?.[2]
+
+  // ── Helper: resolver redirects de jkplayers → URL real ───────────────────
+  const resolverRedirect = async (href) => {
+    let current = href
     try {
-      console.log(`[jkanime-notify] JKAnime API descarga: /ajax/download_episode/${episodeId}`)
-      const apiRes = await axios.get(`${JKANIME_URL}/ajax/download_episode/${episodeId}`, {
-        headers: {
-          ...HEADERS,
-          Referer     : epUrl,
-          'X-CSRF-TOKEN'      : csrfToken,
-          'X-Requested-With'  : 'XMLHttpRequest',
-        },
-        timeout: 12000,
-      })
-      // Respuesta: { url: "https://...", nombre: "archivo.mp4" }
-      const dlUrl    = apiRes.data?.url   || ''
-      const dlNombre = apiRes.data?.nombre || ''
-      if (dlUrl.startsWith('http')) {
-        const esMega      = dlUrl.includes('mega.nz')
-        const esMediafire = dlUrl.includes('mediafire.com')
-        const nombre = esMega ? 'mega' : esMediafire ? 'mediafire' : detectarServNombre(dlUrl)
-        srvs.push({ nombre, url: dlUrl, directo: esMega || esMediafire, apiNombre: dlNombre })
-        console.log(`[jkanime-notify] JKAnime API OK → ${nombre}: ${dlUrl.slice(0, 80)}`)
+      for (let i = 0; i < 5; i++) {
+        const res = await axios.get(current, {
+          headers      : { ...HEADERS, Referer: JKANIME_URL },
+          maxRedirects : 0,
+          validateStatus: s => s < 400,
+          timeout      : 8000,
+        })
+        const loc = res.headers?.location
+        if (!loc) break
+        current = loc.startsWith('http') ? loc : new URL(loc, current).href
+        if (!current.includes('jkplayers.com')) break
       }
-    } catch (err) {
-      console.log(`[jkanime-notify] JKAnime API descarga falló (${err.message}), usando fallback HTML`)
-    }
-  } else {
-    console.log(`[jkanime-notify] JKAnime: no se encontró episode ID en ${epUrl}`)
+    } catch (_) {}
+    return current
   }
 
-  // ── Paso 4: fallback — buscar servidores embed en el HTML ─────────────────
-  // JKAnime también puede tener var servers = [...] o botones .servers
-  if (srvs.length === 0) {
-    $('script').each((_, el) => {
-      const code = $(el).html() || ''
+  // ── Estrategia 1: API /ajax/episode/2/ (la más confiable) ────────────────
+  if (slug && cap) {
+    const SERVIDORES_JK = ['sw', 'jkvideo', 'stape', 'mp4upload', 'filemoon', 'voe',
+                           'okru', 'uqload', 'doodstream', 'vidhide', 'streamwish']
+    const apiHeaders = {
+      ...HEADERS,
+      Referer             : epUrl,
+      'X-Requested-With'  : 'XMLHttpRequest',
+      'Accept'            : 'application/json',
+    }
 
-      const mArr = code.match(/var\s+(?:servers|videos|reproductores)\s*=\s*(\[[\s\S]*?\])\s*[;,\n]/)
-      if (mArr) {
-        try {
-          for (const item of JSON.parse(mArr[1])) {
-            const url    = item.embed || item.url || item.file || item.code || ''
-            const nombre = (item.server || item.title || item.label || '').toLowerCase()
-            if (!url.startsWith('http') || srvs.find(s => s.url === url)) continue
-            const sinSoporte = url.includes('hqq.tv') || url.includes('netu.tv')
-            if (sinSoporte) continue
-            const esMega = url.includes('mega.nz'), esMediafire = url.includes('mediafire.com')
-            srvs.push({ nombre: esMega ? 'mega' : esMediafire ? 'mediafire' : nombre || detectarServNombre(url), url, directo: esMega || esMediafire })
-          }
-        } catch (_) {}
+    for (const srv of SERVIDORES_JK) {
+      if (srvs.length >= 6) break
+      try {
+        const apiUrl = `${JKANIME_URL}/ajax/episode/2/?id=${slug}&cap=${cap}&server=${srv}`
+        const res    = await axios.get(apiUrl, { headers: apiHeaders, timeout: 10000 })
+        if (!res.data) continue
+        const json = res.data
+
+        // Campo remote en base64
+        if (json?.remote) {
+          try {
+            let d = json.remote
+            const pad = 4 - (d.length % 4)
+            if (pad !== 4) d += '='.repeat(pad)
+            const decoded = Buffer.from(d, 'base64').toString('utf-8').trim()
+            if (decoded.startsWith('http') && !srvs.find(s => s.url === decoded)) {
+              const finalUrl = decoded.includes('jkplayers.com') ? await resolverRedirect(decoded) : decoded
+              const esMf = finalUrl.includes('mediafire.com')
+              const esMg = finalUrl.includes('mega.nz')
+              console.log(`[jkanime-notify] API(1) ${srv}: ${finalUrl.slice(0, 70)}`)
+              srvs.push({
+                nombre : esMf ? 'mediafire' : esMg ? 'mega' : srv,
+                url    : finalUrl,
+                directo: esMf || esMg,
+              })
+              continue
+            }
+          } catch (_) {}
+        }
+
+        // Campo source/iframe/url
+        const embedUrl =
+          json?.source?.[0]?.file || json?.iframe || json?.url ||
+          json?.embed || json?.data?.url || json?.data?.iframe
+        if (embedUrl?.startsWith('http') && !srvs.find(s => s.url === embedUrl)) {
+          const finalUrl = embedUrl.includes('jkplayers.com') ? await resolverRedirect(embedUrl) : embedUrl
+          const esMf = finalUrl.includes('mediafire.com')
+          const esMg = finalUrl.includes('mega.nz')
+          console.log(`[jkanime-notify] API(1) ${srv}: ${finalUrl.slice(0, 70)}`)
+          srvs.push({
+            nombre : esMf ? 'mediafire' : esMg ? 'mega' : srv,
+            url    : finalUrl,
+            directo: esMf || esMg,
+          })
+        }
+      } catch (e) {
+        console.log(`[jkanime-notify] API(1) ${srv} falló: ${e.message}`)
       }
-    })
+    }
+    console.log(`[jkanime-notify] Estrategia 1: ${srvs.length} servidor(es)`)
+  }
 
-    // Botones .servers con data-video
-    $('[data-video], [data-url], [data-embed]').each((_, el) => {
-      const raw = $(el).attr('data-video') || $(el).attr('data-url') || $(el).attr('data-embed') || ''
-      let embedUrl = raw
-      try { const dec = Buffer.from(raw, 'base64').toString('utf-8'); if (dec.startsWith('http')) embedUrl = dec } catch (_) {}
-      if (!embedUrl.startsWith('http') || srvs.find(s => s.url === embedUrl)) return
-      srvs.push({ nombre: $(el).text().trim().toLowerCase() || detectarServNombre(embedUrl), url: embedUrl, directo: false })
-    })
+  // ── Estrategia 2: API /ajax/download_episode/<ID> con CSRF ───────────────
+  if (srvs.length === 0) {
+    let html
+    try {
+      const res = await axios.get(epUrl, { headers: { ...HEADERS, Referer: JKANIME_URL }, timeout: 15000 })
+      html = res.data
+    } catch (err) {
+      console.log(`[jkanime-notify] Error cargando página: ${err.message}`)
+      html = ''
+    }
 
-    // Links directos
-    $('a[href]').each((_, el) => {
-      const href = $(el).attr('href') || ''
-      if (!href.startsWith('http')) return
-      const esMega = href.includes('mega.nz'), esMediafire = href.includes('mediafire.com')
-      const esGofile = href.includes('gofile.io'), es1fichier = href.includes('1fichier.com')
-      if (!esMega && !esMediafire && !esGofile && !es1fichier) return
-      if (srvs.find(s => s.url === href)) return
-      srvs.push({ nombre: esMega ? 'mega' : esMediafire ? 'mediafire' : esGofile ? 'gofile' : '1fichier', url: href, directo: true })
-    })
+    const $ = cheerio.load(html)
+    let episodeId = null
 
-    // iframes último recurso
-    if (srvs.length === 0) {
-      $('iframe[src]').each((_, el) => {
-        const src = $(el).attr('src') || ''
-        if (src.startsWith('http')) srvs.push({ nombre: detectarServNombre(src), url: src, directo: false })
+    // Método A: botón #jkdown
+    const jkdownHref = $('#jkdown').attr('href') || ''
+    const mHref = jkdownHref.match(/\/ajax\/download_episode\/(\d+)/)
+    if (mHref) episodeId = mHref[1]
+
+    // Método B: scripts inline
+    if (!episodeId) {
+      $('script').each((_, el) => {
+        const code = $(el).html() || ''
+        const m = code.match(/\/ajax\/download_episode\/(\d+)/)
+        if (m) { episodeId = m[1]; return false }
       })
+    }
+
+    // Método C: cualquier atributo
+    if (!episodeId) {
+      $('[href*="/ajax/download_episode/"], [data-url*="/ajax/download_episode/"]').each((_, el) => {
+        const val = $(el).attr('href') || $(el).attr('data-url') || ''
+        const m   = val.match(/\/ajax\/download_episode\/(\d+)/)
+        if (m) { episodeId = m[1]; return false }
+      })
+    }
+
+    const csrfToken = $('meta[name="csrf-token"]').attr('content') || ''
+
+    if (episodeId) {
+      try {
+        console.log(`[jkanime-notify] API(2) download_episode/${episodeId}`)
+        const apiRes = await axios.get(`${JKANIME_URL}/ajax/download_episode/${episodeId}`, {
+          headers: { ...HEADERS, Referer: epUrl, 'X-CSRF-TOKEN': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+          timeout: 12000,
+        })
+        const dlUrl    = apiRes.data?.url   || ''
+        const dlNombre = apiRes.data?.nombre || ''
+        if (dlUrl.startsWith('http')) {
+          const esMega      = dlUrl.includes('mega.nz')
+          const esMediafire = dlUrl.includes('mediafire.com')
+          const nombre = esMediafire ? 'mediafire' : esMega ? 'mega' : detectarServNombre(dlUrl)
+          srvs.push({ nombre, url: dlUrl, directo: esMega || esMediafire, apiNombre: dlNombre })
+          console.log(`[jkanime-notify] API(2) OK → ${nombre}: ${dlUrl.slice(0, 80)}`)
+        }
+      } catch (err) {
+        console.log(`[jkanime-notify] API(2) falló: ${err.message}`)
+      }
+    }
+
+    // ── Estrategia 3: fallback HTML ──────────────────────────────────────
+    if (srvs.length === 0) {
+      $('script').each((_, el) => {
+        const code = $(el).html() || ''
+        const mArr = code.match(/var\s+(?:servers|videos|reproductores)\s*=\s*(\[[\s\S]*?\])\s*[;,\n]/)
+        if (mArr) {
+          try {
+            for (const item of JSON.parse(mArr[1])) {
+              const url    = item.embed || item.url || item.file || item.code || ''
+              const nombre = (item.server || item.title || item.label || '').toLowerCase()
+              if (!url.startsWith('http') || srvs.find(s => s.url === url)) continue
+              if (url.includes('hqq.tv') || url.includes('netu.tv')) continue
+              const esMf = url.includes('mediafire.com'), esMg = url.includes('mega.nz')
+              srvs.push({ nombre: esMf ? 'mediafire' : esMg ? 'mega' : nombre || detectarServNombre(url), url, directo: esMf || esMg })
+            }
+          } catch (_) {}
+        }
+      })
+
+      $('[data-video], [data-url], [data-embed]').each((_, el) => {
+        const raw = $(el).attr('data-video') || $(el).attr('data-url') || $(el).attr('data-embed') || ''
+        let embedUrl = raw
+        try { const dec = Buffer.from(raw, 'base64').toString('utf-8'); if (dec.startsWith('http')) embedUrl = dec } catch (_) {}
+        if (!embedUrl.startsWith('http') || srvs.find(s => s.url === embedUrl)) return
+        srvs.push({ nombre: $(el).text().trim().toLowerCase() || detectarServNombre(embedUrl), url: embedUrl, directo: false })
+      })
+
+      $('a[href]').each((_, el) => {
+        const href = $(el).attr('href') || ''
+        if (!href.startsWith('http')) return
+        const esMf = href.includes('mediafire.com'), esMg = href.includes('mega.nz')
+        const esGf = href.includes('gofile.io'),    es1f = href.includes('1fichier.com')
+        if (!esMf && !esMg && !esGf && !es1f) return
+        if (srvs.find(s => s.url === href)) return
+        srvs.push({ nombre: esMf ? 'mediafire' : esMg ? 'mega' : esGf ? 'gofile' : '1fichier', url: href, directo: true })
+      })
+
+      if (srvs.length === 0) {
+        $('iframe[src]').each((_, el) => {
+          const src = $(el).attr('src') || ''
+          if (src.startsWith('http')) srvs.push({ nombre: detectarServNombre(src), url: src, directo: false })
+        })
+      }
     }
   }
 
@@ -1140,54 +1205,90 @@ let handler = async (m, { conn, text, usedPrefix, command }) => {
     return m.reply(`⏱️ Intervalo actualizado a *${min} minutos*.`)
   }
 
-  // ── .jkexample [N] — prueba con episodios recientes de JKAnime ────────────
-  if (command === 'jkexample') {
-    const cantidad = Math.min(Math.max(parseInt(text?.trim()) || 1, 1), 10)
-    await m.reply(`🔍 Obteniendo los *${cantidad}* episodio(s) más reciente(s) de *JKAnime*...`)
+  // ── Helper: enviar lista interactiva de episodios ──────────────────────────
+  // Guarda estado en global.jkPendingPick (chatId → { eps, owner, timestamp })
+  // El handler.before lo procesa cuando llega la respuesta del usuario.
+  const enviarListaEpisodios = async (lista, fuente) => {
+    const MAX_EP = 10
+    const eps    = lista.slice(0, MAX_EP)
+    const titulo = `🎌 Episodios recientes — ${fuente}`
+    const body   = `${eps.length} episodio(s) disponible(s). Elige cuál descargar:`
 
+    // Guardar estado de selección pendiente
+    if (!global.jkPendingPick) global.jkPendingPick = new Map()
+    global.jkPendingPick.set(m.chat, { eps, owner: m.sender, timestamp: Date.now() })
+
+    const rows = eps.map((ep, i) => ({
+      title      : ep.titulo,
+      description: `Ep ${zeroPad(ep.epNum)}${ep.idioma ? ' · ' + ep.idioma : ''}`,
+      id         : `__jkpick__${i}`,
+    }))
+
+    // Intentar botones nativos (móvil)
+    try {
+      const baileys = await import('baileys')
+      const { generateWAMessageFromContent, getDevice } = baileys
+      const device   = getDevice(m.key.id)
+      const isMobile = device !== 'desktop' && device !== 'web'
+      if (isMobile) {
+        const interactiveMessage = {
+          body  : { text: body },
+          footer: { text: global.wm || 'Kana Arima Bot' },
+          header: { title: titulo, hasMediaAttachment: false },
+          nativeFlowMessage: {
+            buttons: [{
+              name: 'single_select',
+              buttonParamsJson: JSON.stringify({
+                title   : 'VER EPISODIOS',
+                sections: [{ title: 'Episodios disponibles', rows }],
+              }),
+            }],
+            messageParamsJson: '',
+          },
+        }
+        const msg = generateWAMessageFromContent(
+          m.chat,
+          { viewOnceMessage: { message: { interactiveMessage } } },
+          { userJid: conn.user.jid, quoted: m }
+        )
+        await conn.relayMessage(m.chat, msg.message, { messageId: msg.key.id })
+        return
+      }
+    } catch (_) {}
+
+    // Fallback: texto plano con letras (a, b, c…)
+    const lineas = eps.map((ep, i) => {
+      const letra = String.fromCharCode(97 + i)
+      return `*${letra}.* ${ep.titulo} — Ep ${zeroPad(ep.epNum)}${ep.idioma ? ' [' + ep.idioma + ']' : ''}`
+    })
+    await m.reply(
+      `*${titulo}*\n\n` +
+      lineas.join('\n') +
+      `\n\n_Responde con la letra para descargar (ej: *a*)_`
+    )
+  }
+
+  // ── .jkexample [N] — lista interactiva de episodios recientes JKAnime ─────
+  if (command === 'jkexample') {
+    await m.reply(`🔍 Obteniendo episodios recientes de *JKAnime*...`)
     let lista = []
     try {
       lista = await fetchLatestEpisodesJKAnime()
       if (!lista.length) return m.reply(`❌ Sin episodios de JKAnime disponibles. Intenta más tarde.`)
     } catch (err) { return m.reply(`❌ Error al obtener episodios: ${err.message}`) }
-
-    const seleccion = lista.slice(0, cantidad)
-    if (seleccion.length > 1) {
-      await m.reply(
-        `📋 *${seleccion.length} episodios seleccionados (JKAnime):*\n\n` +
-        seleccion.map((e, i) => `${i + 1}. *${e.titulo}* — Ep ${zeroPad(e.epNum)}`).join('\n') +
-        `\n\n⏳ _Se enviarán de uno en uno..._`
-      )
-    }
-
-    for (const ep of seleccion) global.jkEpisodeQueue.push({ chatId: m.chat, ep })
-    procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
-    return
+    // El scraper devuelve en orden de portada (más reciente primero = índice 0)
+    return enviarListaEpisodios(lista, 'JKAnime 🇯🇵')
   }
 
-  // ── .dbsexample [N] — prueba con episodios recientes de AnimeDBS ──────────
+  // ── .dbsexample [N] — lista interactiva de episodios recientes AnimeDBS ───
   if (command === 'dbsexample') {
-    const cantidad = Math.min(Math.max(parseInt(text?.trim()) || 1, 1), 10)
-    await m.reply(`🔍 Obteniendo los *${cantidad}* episodio(s) más reciente(s) de *AnimeDBS*...`)
-
+    await m.reply(`🔍 Obteniendo episodios recientes de *AnimeDBS*...`)
     let lista = []
     try {
       lista = await fetchLatestEpisodesAnimeDBS()
       if (!lista.length) return m.reply(`❌ Sin episodios de AnimeDBS disponibles. Intenta más tarde.`)
     } catch (err) { return m.reply(`❌ Error al obtener episodios: ${err.message}`) }
-
-    const seleccion = lista.slice(0, cantidad)
-    if (seleccion.length > 1) {
-      await m.reply(
-        `📋 *${seleccion.length} episodios seleccionados (AnimeDBS):*\n\n` +
-        seleccion.map((e, i) => `${i + 1}. *${e.titulo}* — Ep ${zeroPad(e.epNum)}`).join('\n') +
-        `\n\n⏳ _Se enviarán de uno en uno..._`
-      )
-    }
-
-    for (const ep of seleccion) global.jkEpisodeQueue.push({ chatId: m.chat, ep })
-    procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
-    return
+    return enviarListaEpisodios(lista, 'AnimeDBS 🌐')
   }
 }
 
@@ -1201,6 +1302,57 @@ handler.limit   = false
 handler.before = async (m, { conn }) => {
   if (conn) global.jkConn = conn
   restaurarNotificadores(conn)
+
+  // ── Procesar selección de episodio desde lista interactiva ─────────────────
+  if (!global.jkPendingPick) global.jkPendingPick = new Map()
+
+  // Respuesta de botón nativeFlow (móvil)
+  const nativeFlow = m.message?.interactiveResponseMessage?.nativeFlowResponseMessage
+  if (nativeFlow) {
+    try {
+      const params     = JSON.parse(nativeFlow.paramsJson || '{}')
+      const selectedId = params?.id || null
+      if (selectedId?.startsWith('__jkpick__')) {
+        const pick = global.jkPendingPick.get(m.chat)
+        if (!pick) return false
+        if (pick.owner && pick.owner !== m.sender) return false
+        const idx = parseInt(selectedId.replace('__jkpick__', ''))
+        const ep  = pick.eps[idx]
+        if (!ep) return false
+        global.jkPendingPick.delete(m.chat)
+        const c = global.jkConn
+        if (c) {
+          global.jkEpisodeQueue.push({ chatId: m.chat, ep })
+          procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
+          await conn.sendMessage(m.chat, { text: `✅ *${ep.titulo}* Ep ${zeroPad(ep.epNum)} añadido a la cola.` }, { quoted: m })
+        }
+        return true
+      }
+    } catch (_) {}
+    return false
+  }
+
+  // Respuesta con letra (a, b, c…) para desktop/web
+  const letra = m.text?.trim().toLowerCase()
+  if (/^[a-j]$/.test(letra)) {
+    const pick = global.jkPendingPick.get(m.chat)
+    if (pick && Date.now() - pick.timestamp < 5 * 60 * 1000) {
+      if (pick.owner && pick.owner !== m.sender) return false
+      const idx = letra.charCodeAt(0) - 97
+      const ep  = pick.eps[idx]
+      if (!ep) {
+        await conn.sendMessage(m.chat, { text: `❌ Letra inválida. Elige entre *a* y *${String.fromCharCode(97 + pick.eps.length - 1)}*.` }, { quoted: m })
+        return true
+      }
+      global.jkPendingPick.delete(m.chat)
+      global.jkEpisodeQueue.push({ chatId: m.chat, ep })
+      procesarCola().catch(e => console.error('[jkanime-notify] cola error:', e.message))
+      await conn.sendMessage(m.chat, { text: `✅ *${ep.titulo}* Ep ${zeroPad(ep.epNum)} añadido a la cola.` }, { quoted: m })
+      return true
+    }
+  }
+
+  return false
 }
 
 export default handler
